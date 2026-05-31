@@ -1,0 +1,27 @@
+# orchard configuration - copy to config.yaml and edit.
+#
+# Search order (first match wins):
+#   1. --config PATH
+#   2. $ORCHARD_CONFIG
+#   3. ./config.yaml
+#   4. <directory of the orchard binary>/config.yaml
+#   5. $XDG_CONFIG_HOME/orchard/config.yaml   (e.g. ~/.config/orchard/config.yaml)
+#
+# Everything is optional. Precedence: CLI flags > env vars > config file > defaults.
+# This is a tiny key: value format (not full YAML) with one nested "scope:" section.
+
+# Folder that holds your git repositories (scanned one level deep).
+# Also settable via --root or $ORCHARD_ROOT. Defaults to the current directory.
+root: ~/Documents/GitHub
+
+# Maximum parallel git operations (default: 8).
+concurrency: 8
+
+# Default GitHub org for `orchard clone` (also --org).
+org: your-github-org
+
+# Restrict which org repos `clone` will fetch. `clone` requires a match pattern
+# so you never clone an entire org by accident.
+scope:
+  match: "^(service|app)-"     # regular expression matched against repo names
+  repos: []                    # (reserved) explicit allow-list

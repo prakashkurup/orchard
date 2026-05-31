@@ -1,0 +1,53 @@
+# GoReleaser configuration - https://goreleaser.com
+# Cut a release by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+# (the .github/workflows/release.yml action then builds & publishes binaries).
+version: 2
+
+project_name: orchard
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: orchard
+    main: .
+    binary: orchard
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: orchard
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - config.example.yaml
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    ---
+    Install: download the archive for your OS/arch below, extract it, and move
+    `orchard` onto your `PATH`. See the README for details.

@@ -1,0 +1,797 @@
+// Package tui is the Bubble Tea dashboard for managing many local git repos.
+package tui
+
+import (
+	"context"
+	"fmt"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/editor"
+	orchardgit "github.com/prakashkurup/orchard/internal/git"
+	"github.com/prakashkurup/orchard/internal/lang"
+	"github.com/prakashkurup/orchard/internal/repo"
+	"github.com/prakashkurup/orchard/internal/search"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+type uiMode int
+
+const (
+	modeList uiMode = iota
+	modeDetail
+	modeEditor
+	modeSearch
+	modeBranch
+	modeHelp
+	modeWorklog
+	modeClone
+	modeConfirm
+)
+
+type sortMode int
+
+const (
+	sortAttention sortMode = iota
+	sortName
+	sortSynced
+	sortClaude
+	sortModeCount
+)
+
+func (s sortMode) String() string {
+	switch s {
+	case sortName:
+		return "name"
+	case sortSynced:
+		return "synced"
+	case sortClaude:
+		return "claude"
+	default:
+		return "attention"
+	}
+}
+
+type quickFilter int
+
+const (
+	filterAll quickFilter = iota
+	filterAttention
+	filterDirty
+	filterBehind
+	filterFeature
+	filterCount // sentinel: number of quick filters
+)
+
+func (q quickFilter) String() string {
+	switch q {
+	case filterAttention:
+		return "attention"
+	case filterDirty:
+		return "dirty"
+	case filterBehind:
+		return "behind"
+	case filterFeature:
+		return "feature"
+	default:
+		return "all"
+	}
+}
+
+// viewItem is one rendered line: either a group header or a repo row.
+type viewItem struct {
+	header  bool
+	group   repo.DisplayState
+	count   int
+	repoIdx int // index into m.repos
+}
+
+type model struct {
+	root        string
+	concurrency int
+	width       int
+	height      int
+	cursor      int // index into m.view, always on a repo row
+
+	viewport    viewport.Model
+	detailVP    viewport.Model
+	spinner     spinner.Model
+	filterInput textinput.Model
+
+	repos    []repo.Repo
+	selected map[string]bool
+	view     []viewItem
+
+	mode       uiMode
+	sortMode   sortMode
+	grouped    bool
+	quick      quickFilter
+	filtering  bool
+	filterText string
+
+	pulling                      map[string]bool
+	pullDone, pullSkip, pullFail int
+
+	detail     *detailState
+	detailRepo string
+
+	editorID     string
+	editorPick   []editor.Editor
+	editorCursor int
+	editorRepo   string
+
+	branchRepo    string
+	branchInput   textinput.Model
+	branchAll     []orchardgit.Branch
+	branchCursor  int
+	branchLoading bool
+	branchBusy    bool   // a checkout is in flight (modal stays open)
+	branchTarget  string // branch being switched to (for retry / message)
+	branchErr     string // checkout error shown in the modal, "" when none
+
+	cloneInput textinput.Model
+
+	confirmRepos []repo.Repo // pending targets awaiting confirmation
+	confirmKind  confirmKind // which action the confirmation will run
+	confirmYes   bool        // confirm modal selection (true = Yes, the default)
+
+	claudeUsage *claude.Usage
+
+	searchInput   textinput.Model
+	searchVP      viewport.Model
+	searchResults []search.Result
+	searchFlat    []search.Match
+	searchCursor  int
+	searchQuery   string
+	searchFocus   bool // true = editing query, false = navigating results
+	searchRunning bool
+
+	autoRefresh bool
+
+	worklogWindow string // git --since value, e.g. "1 day ago"
+	worklogText   string // plain-text digest for clipboard copy
+
+	newByPath   map[string]int       // repo path -> commits since last visit
+	langByPath  map[string]lang.Stat // repo path -> dominant language
+	seenChecked bool
+
+	konami      []string // recent arrow keys, for the bloom easter egg
+	bloomFrames int      // remaining frames of the bloom animation
+
+	idle      int  // idle-probe ticks since the last input (≈ seconds awake)
+	idleAfter int  // seconds of idle before the screensaver wakes (0 = disabled)
+	idleGen   int  // generation token so a fresh idle tick supersedes stale ones
+	ssActive  bool // the idle screensaver is showing
+	ssFrame   int  // screensaver animation frame
+
+	assistantCmd   string // AI assistant launched by `c` ("" = none found)
+	assistantLabel string // short footer label for the assistant
+
+	loading bool
+	status  string
+	err     string
+}
+
+type scanMsg struct {
+	repos []repo.Repo
+	err   error
+}
+
+type pullOneMsg struct {
+	result orchardgit.PullResult
+}
+
+type fetchOneMsg struct {
+	repo repo.Repo
+	err  error
+}
+
+type statusMsg struct {
+	text string
+}
+
+type detailMsg struct {
+	path  string
+	info  orchardgit.DetailInfo
+	langs []lang.Stat
+	err   error
+}
+
+type claudeStatsMsg struct {
+	usage claude.Usage
+}
+
+type tickMsg time.Time
+
+// idleTickMsg drives idle detection and the screensaver; gen is matched against
+// the model's current idleGen so superseded ticks are ignored.
+type idleTickMsg struct{ gen int }
+
+// newCommitsMsg carries the "since last visit" counts computed once at startup.
+type newCommitsMsg struct {
+	byPath map[string]int
+}
+
+// langMsg carries dominant languages computed once at startup.
+type langMsg struct {
+	byPath map[string]lang.Stat
+}
+
+type worklogGroup struct {
+	repo    string
+	commits []orchardgit.Commit
+}
+
+type worklogMsg struct {
+	window string
+	groups []worklogGroup
+	total  int
+	text   string // plain text for clipboard
+}
+
+type cloneDoneMsg struct {
+	name string
+	err  error
+}
+
+// silentScanMsg is the result of a background auto-refresh (no loading flicker,
+// no Claude re-aggregation).
+type silentScanMsg struct {
+	repos []repo.Repo
+}
+
+type branchesMsg struct {
+	path     string
+	branches []orchardgit.Branch
+	err      error
+}
+
+type checkoutMsg struct {
+	repo    repo.Repo
+	branch  string
+	err     error
+	stashed bool // true when the switch was preceded by an auto-stash
+}
+
+type searchResultMsg struct {
+	query   string
+	results []search.Result
+}
+
+func Run(root string, concurrency int) error {
+	m := newModel(root, concurrency)
+	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if err == nil {
+		fmt.Println(farewell())
+	}
+	return err
+}
+
+func Preview(root string, concurrency, width, height int, grouped bool) (string, error) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	if demoMode() {
+		m := newModel(root, concurrency)
+		m.width, m.height = width, height
+		m.loading = false
+		m.grouped = grouped
+		m.repos = demoRepos()
+		m.status = fmt.Sprintf("previewing %d repos", len(m.repos))
+		u := demoClaude()
+		m.claudeUsage = &u
+		m.langByPath = demoLangs()
+		m.newByPath = demoNew()
+		m.resize()
+		m.syncRows()
+		return m.View(), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	repos, err := orchardgit.Scan(ctx, root, concurrency)
+	if err != nil {
+		return "", err
+	}
+	enrichClaude(repos)
+	m := newModel(root, concurrency)
+	m.width = width
+	m.height = height
+	m.loading = false
+	m.grouped = grouped
+	m.status = fmt.Sprintf("previewing %d repos", len(repos))
+	m.repos = repos
+	targets := make([]claude.Target, 0, len(repos))
+	for _, r := range repos {
+		targets = append(targets, claude.Target{Name: r.Name, Path: r.Path})
+	}
+	u := claude.Aggregate(targets)
+	m.claudeUsage = &u
+	for _, r := range repos {
+		if s := lang.Dominant(ctx, r.Path); s.Name != "" {
+			m.langByPath[r.Path] = s
+		}
+	}
+	m.resize()
+	m.syncRows()
+	return m.View(), nil
+}
+
+// PreviewDetail renders the detail view for one repo (by name) once, for testing.
+func PreviewDetail(root string, concurrency, width, height int, name string) (string, error) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var repos []repo.Repo
+	if demoMode() {
+		repos = demoRepos()
+	} else {
+		var err error
+		repos, err = orchardgit.Scan(ctx, root, concurrency)
+		if err != nil {
+			return "", err
+		}
+		enrichClaude(repos)
+	}
+	m := newModel(root, concurrency)
+	m.width, m.height = width, height
+	m.loading = false
+	m.repos = repos
+	m.resize()
+	var target repo.Repo
+	for _, r := range repos {
+		if r.Name == name {
+			target = r
+		}
+	}
+	if target.Path == "" {
+		return "", fmt.Errorf("repo %q not found", name)
+	}
+	m.mode = modeDetail
+	m.detailRepo = target.Path
+	if demoMode() {
+		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path)}
+	} else {
+		info, _ := orchardgit.Detail(ctx, target)
+		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path)}
+	}
+	m.setDetailContent()
+	return m.View(), nil
+}
+
+func newModel(root string, concurrency int) model {
+	vp := viewport.New(100, 16)
+	vp.MouseWheelEnabled = true
+
+	dvp := viewport.New(100, 16)
+	dvp.MouseWheelEnabled = true
+
+	sp := spinner.New()
+	sp.Spinner = spinner.MiniDot
+	// No style here: spinner.View() must return a bare frame. Color is applied by
+	// whichever cell renders it, so the ANSI never gets re-processed by fit().
+	sp.Style = lipgloss.NewStyle()
+
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.Placeholder = "filter by name or branch…"
+	ti.CharLimit = 64
+
+	si := textinput.New()
+	si.Prompt = ""
+	si.Placeholder = "search code across all repos…"
+	si.CharLimit = 128
+
+	svp := viewport.New(100, 16)
+	svp.MouseWheelEnabled = true
+
+	bi := textinput.New()
+	bi.Prompt = ""
+	bi.Placeholder = "filter branches…"
+	bi.CharLimit = 80
+
+	ci := textinput.New()
+	ci.Prompt = ""
+	ci.Placeholder = "git URL or owner/repo…"
+	ci.CharLimit = 200
+
+	// Inputs must paint their own background or the placeholder (256-color grey
+	// with no bg) falls through to the terminal default and shows as a grey box.
+	// Modal inputs sit on the panel; the dashboard filter and search on the app bg.
+	onPanel := lipgloss.NewStyle().Background(lipgloss.Color(panel))
+	onBg := lipgloss.NewStyle().Background(lipgloss.Color(bg))
+	bi.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
+	bi.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
+	ci.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
+	ci.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
+	ti.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
+	ti.TextStyle = onBg.Foreground(lipgloss.Color(ice))
+	si.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
+	si.TextStyle = onBg.Foreground(lipgloss.Color(ice))
+
+	aCmd, aLabel, _ := resolveAssistant()
+
+	return model{
+		root:           root,
+		concurrency:    concurrency,
+		viewport:       vp,
+		detailVP:       dvp,
+		spinner:        sp,
+		filterInput:    ti,
+		searchInput:    si,
+		searchVP:       svp,
+		branchInput:    bi,
+		cloneInput:     ci,
+		selected:       map[string]bool{},
+		pulling:        map[string]bool{},
+		newByPath:      map[string]int{},
+		langByPath:     map[string]lang.Stat{},
+		editorID:       editor.DefaultID(),
+		sortMode:       sortName, // launch sorted by name (not the sortAttention zero value)
+		autoRefresh:    true,
+		loading:        true,
+		status:         tendingLine(),
+		assistantCmd:   aCmd,
+		assistantLabel: aLabel,
+		idleGen:        1,
+		idleAfter:      idleSeconds(),
+	}
+}
+
+// displayRoot resolves the scan root to an absolute path with the home dir
+// abbreviated to ~, so the header never shows a confusing relative path like "..".
+func displayRoot(root string) string {
+	p := repo.ExpandPath(root)
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(p, home) {
+		p = "~" + p[len(home):]
+	}
+	return p
+}
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), idleTickCmd(idleProbe, m.idleGen))
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.resize()
+		return m, nil
+
+	case scanMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.err = msg.err.Error()
+			m.status = "scan failed"
+			return m, nil
+		}
+		m.repos = msg.repos
+		m.dropMissingSelections()
+		m.status = fmt.Sprintf("scanned %d repos", len(msg.repos))
+		m.claudeUsage = nil // recompute the pinned usage panel
+		m.syncRows()
+		// recompute languages on every manual scan (startup / refresh / after
+		// clone) so newly-added repos get their language; claude usage too.
+		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos)}
+		if !m.seenChecked { // "since last visit" baseline: once per launch only
+			m.seenChecked = true
+			cmds = append(cmds, newCommitsCmd(m.repos))
+		}
+		return m, tea.Batch(cmds...)
+
+	case newCommitsMsg:
+		m.newByPath = msg.byPath
+		m.syncRows()
+		return m, nil
+
+	case langMsg:
+		m.langByPath = msg.byPath
+		m.syncRows()
+		return m, nil
+
+	case worklogMsg:
+		if m.mode == modeWorklog {
+			m.worklogText = msg.text
+			m.detailVP.SetContent(m.worklogBody(m.detailVP.Width, msg))
+			m.detailVP.GotoTop()
+		}
+		return m, nil
+
+	case cloneDoneMsg:
+		if msg.err != nil {
+			m.loading = false
+			m.err = ""
+			m.status = "clone failed: " + firstLine(msg.err.Error())
+			return m, nil
+		}
+		m.status = "cloned " + msg.name + " · refreshing"
+		return m, scanCmd(m.root, m.concurrency) // pick up the new repo
+
+	case pullOneMsg:
+		m.applyOneResult(msg.result)
+		delete(m.pulling, msg.result.Repo.Path)
+		switch msg.result.Status {
+		case orchardgit.StatusPulled:
+			m.pullDone++
+		case orchardgit.StatusSkipped:
+			m.pullSkip++
+		case orchardgit.StatusFailed:
+			m.pullFail++
+		}
+		if len(m.pulling) == 0 {
+			m.loading = false
+			m.status = fmt.Sprintf("pull complete: %d pulled · %d skipped · %d failed", m.pullDone, m.pullSkip, m.pullFail)
+		}
+		m.syncRows()
+		return m, nil
+
+	case fetchOneMsg:
+		for i, r := range m.repos {
+			if r.Path == msg.repo.Path {
+				m.repos[i] = msg.repo
+				break
+			}
+		}
+		delete(m.pulling, msg.repo.Path)
+		if len(m.pulling) == 0 {
+			m.loading = false
+			m.status = "fetch complete"
+		}
+		m.syncRows()
+		return m, nil
+
+	case statusMsg:
+		m.status = msg.text
+		return m, nil
+
+	case claudeStatsMsg:
+		u := msg.usage
+		m.claudeUsage = &u
+		m.resize() // panel may now appear/disappear; let the list reclaim rows
+		return m, nil
+
+	case tickMsg:
+		// always re-arm; only refresh when idle and on the list (no flicker mid-action)
+		if m.autoRefresh && !m.loading && m.mode == modeList && len(m.pulling) == 0 {
+			return m, tea.Batch(tickCmd(), silentScanCmd(m.root, m.concurrency))
+		}
+		return m, tickCmd()
+
+	case bloomTickMsg:
+		if m.bloomFrames > 0 {
+			m.bloomFrames--
+		}
+		if m.bloomFrames > 0 {
+			return m, bloomTickCmd()
+		}
+		return m, nil
+
+	case idleTickMsg:
+		if msg.gen != m.idleGen {
+			return m, nil // superseded by a fresher tick
+		}
+		// Only the bare dashboard sleeps; any modal/loading keeps it awake.
+		if m.mode != modeList || m.loading || m.filtering {
+			m.idle, m.ssActive = 0, false
+			return m, idleTickCmd(idleProbe, m.idleGen)
+		}
+		m.idle++
+		if !m.ssActive && m.idleAfter > 0 && m.idle >= m.idleAfter {
+			m.ssActive, m.ssFrame = true, 0
+		}
+		next := idleProbe
+		if m.ssActive {
+			m.ssFrame++
+			next = ssFrameDur
+		}
+		return m, idleTickCmd(next, m.idleGen)
+
+	case silentScanMsg:
+		if len(msg.repos) == 0 {
+			return m, nil
+		}
+		m.repos = msg.repos
+		m.dropMissingSelections()
+		m.syncRows()
+		return m, nil
+
+	case branchesMsg:
+		if msg.path == m.branchRepo {
+			m.branchLoading = false
+			m.branchAll = msg.branches
+			m.branchCursor = 0
+			if msg.err != nil {
+				m.status = "branches: " + msg.err.Error()
+			}
+		}
+		return m, nil
+
+	case checkoutMsg:
+		m.branchBusy = false
+		if msg.err != nil {
+			e := msg.err.Error()
+			friendly := "checkout failed: " + firstLine(e)
+			if strings.Contains(e, "would be overwritten") || strings.Contains(e, "local changes") {
+				friendly = msg.repo.Name + " has uncommitted changes"
+			}
+			// keep the branch modal open and show the error there; fall back to the
+			// status line if the modal was already closed.
+			if m.mode == modeBranch {
+				m.branchErr = friendly
+			} else {
+				m.status = friendly
+			}
+		} else {
+			for i, r := range m.repos {
+				if r.Path == msg.repo.Path {
+					m.repos[i] = msg.repo
+					break
+				}
+			}
+			m.mode = modeList
+			m.branchInput.Blur()
+			m.branchErr = ""
+			m.branchTarget = ""
+			m.status = msg.repo.Name + "  →  " + msg.branch
+			if msg.stashed {
+				m.status += "  ·  changes stashed (git stash pop to restore)"
+			}
+		}
+		m.syncRows()
+		return m, nil
+
+	case searchResultMsg:
+		if msg.query == m.searchQuery {
+			m.searchRunning = false
+			m.loading = false
+			m.searchResults = msg.results
+			m.searchCursor = 0
+			m.searchVP.SetYOffset(0)
+			m.flattenSearch()
+			m.searchFocus = false
+			m.setSearchContent()
+		}
+		return m, nil
+
+	case detailMsg:
+		if msg.path == m.detailRepo {
+			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs}
+			if msg.err != nil {
+				st.err = msg.err.Error()
+			} else {
+				st.info = msg.info
+			}
+			m.detail = st
+			m.setDetailContent()
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		if len(m.pulling) > 0 {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			m.syncRows()
+			return m, cmd
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		// Any key wakes the screensaver (and is consumed doing so) and resets idle.
+		if m.ssActive {
+			m.ssActive, m.idle = false, 0
+			m.idleGen++
+			return m, idleTickCmd(idleProbe, m.idleGen)
+		}
+		m.idle = 0
+		if m.filtering {
+			return m.handleFilterKey(msg)
+		}
+		switch m.mode {
+		case modeHelp:
+			return m.handleHelpKey(msg)
+		case modeClone:
+			return m.handleCloneKey(msg)
+		case modeWorklog:
+			return m.handleWorklogKey(msg)
+		case modeEditor:
+			return m.handleEditorKey(msg)
+		case modeBranch:
+			return m.handleBranchKey(msg)
+		case modeSearch:
+			return m.handleSearchKey(msg)
+		case modeDetail:
+			return m.handleDetailKey(msg)
+		case modeConfirm:
+			return m.handleConfirmKey(msg)
+		default:
+			return m.handleListKey(msg)
+		}
+	}
+	return m, nil
+}
+
+func (m *model) resize() {
+	inner := m.innerWidth()
+	m.viewport.Width = inner
+	// header(3)+metrics(1)+grid header(1)+footer(2)+padding(2)=9, plus the
+	// Claude panel(3) when it is shown. When hidden, the list reclaims those rows.
+	chrome := 9
+	if m.showClaudePanel() {
+		chrome += 3
+	}
+	m.viewport.Height = clamp(m.height-chrome, 3, max(3, m.height))
+	m.detailVP.Width = inner
+	m.detailVP.Height = clamp(m.height-7, 3, max(3, m.height))
+	m.searchVP.Width = inner
+	m.searchVP.Height = clamp(m.height-8, 3, max(3, m.height))
+	m.filterInput.Width = clamp(inner-20, 10, 80)
+	m.searchInput.Width = clamp(inner-20, 10, 100)
+	m.ensureCursorVisible()
+	m.syncRows()
+	if m.detail != nil {
+		m.setDetailContent()
+	}
+	if m.mode == modeSearch {
+		// Re-render at the new size so width-based sizing and the keep-selected
+		// -visible scroll math run against the new searchVP dimensions.
+		m.setSearchContent()
+	}
+}
+
+func (m model) innerWidth() int {
+	if m.width <= 0 {
+		return 96
+	}
+	return max(56, m.width-4)
+}
+
+func (m model) View() string {
+	inner := m.innerWidth()
+	switch m.mode {
+	case modeDetail:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.detailView(inner))
+	case modeEditor:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.editorView(inner), inner))
+	case modeBranch:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.branchView(inner), inner))
+	case modeHelp:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.helpView(inner))
+	case modeWorklog:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.worklogView(inner))
+	case modeClone:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.cloneView(inner), inner))
+	case modeConfirm:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.confirmView(inner), inner))
+	case modeSearch:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.searchView(inner))
+	default:
+		if m.ssActive {
+			return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(screensaverView(inner, max(1, m.height-2), m.ssFrame))
+		}
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.dashboardBody(inner))
+	}
+}
+
+// dashboardBody renders the main list screen (header, metrics, grid, Claude
+// panel, footer). It doubles as the backdrop behind floating modals.
+func (m model) dashboardBody(inner int) string {
+	rows := []string{
+		m.headerView(inner),
+		m.metricsView(inner),
+		m.gridView(inner),
+	}
+	if m.showClaudePanel() {
+		rows = append(rows, m.claudePanel(inner))
+	}
+	rows = append(rows, m.footerView(inner))
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}

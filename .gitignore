@@ -1,0 +1,23 @@
+# Compiled binary
+/orchard
+*.exe
+
+# Test & coverage output
+coverage.out
+*.test
+*.out
+
+# Local config (may contain your org / paths)
+/config.yaml
+
+# Go workspace files
+go.work
+go.work.sum
+
+# OS & editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
