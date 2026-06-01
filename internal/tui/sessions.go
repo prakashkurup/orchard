@@ -30,6 +30,7 @@ func (m model) openSessions(r repo.Repo) (tea.Model, tea.Cmd) {
 	m.sessions = nil
 	m.sessionCursor = 0
 	m.sessionsLoading = true
+	m.returnMode = m.mode
 	m.mode = modeSessions
 	return m, sessionsCmd(r)
 }
@@ -48,7 +49,7 @@ func (m model) handleSessionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "q", "h", "H":
-		m.mode = modeList
+		m.mode = m.returnMode
 		return m, nil
 	case "up", "k", "ctrl+p":
 		m.sessionCursor = clamp(m.sessionCursor-1, 0, max(0, len(m.sessions)-1))
@@ -60,7 +61,7 @@ func (m model) handleSessionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		s := m.sessions[m.sessionCursor]
 		r := m.sessionsRepo
-		m.mode = modeList
+		m.mode = m.returnMode
 		return m.runAssistant(r.Path, []string{"--resume", s.ID},
 			"resuming "+m.assistantLabel+" · "+r.Name)
 	}

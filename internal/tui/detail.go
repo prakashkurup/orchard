@@ -5,6 +5,7 @@ import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/prakashkurup/orchard/internal/claude"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
@@ -13,10 +14,11 @@ import (
 )
 
 type detailState struct {
-	repo  repo.Repo
-	info  orchardgit.DetailInfo
-	langs []lang.Stat
-	err   string
+	repo     repo.Repo
+	info     orchardgit.DetailInfo
+	langs    []lang.Stat
+	sessions []claude.Session // recent Claude Code sessions in this repo
+	err      string
 }
 
 func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -52,7 +54,7 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "H":
 		return m.openSessions(m.repoByPath(m.detailRepo))
 	case "M":
-		return m.openClaudeCommitMessage(m.repoByPath(m.detailRepo))
+		return m.openCommitMessage(m.repoByPath(m.detailRepo))
 	case "d":
 		return m.openDiff(m.repoByPath(m.detailRepo))
 	case "b":
@@ -82,14 +84,14 @@ func (m model) openDetail() (tea.Model, tea.Cmd) {
 func detailCmd(r repo.Repo) tea.Cmd {
 	if demoMode() {
 		return func() tea.Msg {
-			return detailMsg{path: r.Path, info: demoDetail(r), langs: demoDetailLangs(r.Path)}
+			return detailMsg{path: r.Path, info: demoDetail(r), langs: demoDetailLangs(r.Path), sessions: demoSessions()}
 		}
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		info, err := orchardgit.Detail(ctx, r)
-		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), err: err}
+		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: claude.Sessions(r.Path, 10), err: err}
 	}
 }
 
@@ -153,6 +155,30 @@ func (m model) detailBody(width int) string {
 			rows = append(rows, line(seg(muted, "      #")+segB(ice, fmt.Sprintf("%d ", pr.Number))+
 				seg(muted, fit(pr.Title, max(10, width-14)))))
 		}
+	}
+
+	// Claude Code - this repo's footprint (last used, totals, recent sessions)
+	if len(d.sessions) > 0 {
+		var turns, tokens int
+		var last time.Time
+		for _, s := range d.sessions {
+			turns += s.Assistant
+			tokens += s.Tokens
+			if s.Modified.After(last) {
+				last = s.Modified
+			}
+		}
+		rows = append(rows, blank, line(segB(claudeC, "  ✦  Claude Code")))
+		rows = append(rows, line(seg(muted, "    ")+
+			seg(claudeC, fmt.Sprintf("%d sessions", len(d.sessions)))+
+			seg(muted, fmt.Sprintf(" · %d turns · %s tokens · last %s", turns, humanTokens(tokens), relTime(last)))))
+		for i, s := range d.sessions {
+			if i >= 3 {
+				break
+			}
+			rows = append(rows, line(seg(muted, "      "+relTime(s.Modified)+"  ")+seg(ice, fit(s.DisplayTitle(), max(10, width-18)))))
+		}
+		rows = append(rows, line(seg(muted, "      press ")+seg(blue, "H")+seg(muted, " to browse and resume sessions")))
 	}
 
 	// working tree - grouped by change type, with file-type icons

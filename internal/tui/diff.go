@@ -24,6 +24,7 @@ func (m model) openDiff(r repo.Repo) (tea.Model, tea.Cmd) {
 	}
 	m.diffRepo = r
 	m.diffText = ""
+	m.returnMode = m.mode
 	m.mode = modeDiff
 	m.detailVP.SetContent(fillLine(subtleStyle.Render("  loading diff…"), m.detailVP.Width, bg))
 	m.detailVP.GotoTop()
@@ -47,7 +48,10 @@ func (m model) handleDiffKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "q", "d":
-		m.mode = modeList
+		m.mode = m.returnMode
+		if m.mode == modeDetail {
+			m.setDetailContent() // the diff reused detailVP; restore the detail body
+		}
 		return m, nil
 	case "up", "k":
 		m.detailVP.ScrollUp(1)
@@ -89,9 +93,29 @@ func colorizeDiff(text string, width int) string {
 		default:
 			color = muted
 		}
-		rows = append(rows, fillLine(seg(color, ln), width, bg))
+		rows = append(rows, fillLine(seg(color, sanitizeDiffLine(ln)), width, bg))
 	}
 	return strings.Join(rows, "\n")
+}
+
+// sanitizeDiffLine strips terminal control bytes (ESC, CR, BEL, the C1 set, etc.)
+// from a diff line so crafted working-tree content cannot inject escape sequences
+// (window-title/clipboard OSC, cursor moves, SGR spoofing) into the viewer. Tabs
+// are kept so code indentation stays readable.
+func sanitizeDiffLine(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\t' {
+			b.WriteRune(r)
+			continue
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (m model) diffView(width int) string {

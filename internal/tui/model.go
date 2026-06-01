@@ -37,6 +37,8 @@ const (
 	modeConfirm
 	modeSessions
 	modeDiff
+	modeStats
+	modeCommitMsg
 )
 
 type sortMode int
@@ -158,6 +160,19 @@ type model struct {
 	diffRepo repo.Repo // repo whose working-tree diff is shown
 	diffText string    // raw diff text, kept so it can re-colorize on resize
 
+	returnMode uiMode // where a modal returns to on close (list, or detail if opened there)
+
+	statsLoading bool           // the stats heatmaps are still computing
+	statsHarvest map[string]int // commit day -> count (stats page)
+	statsClaude  map[string]int // Claude session day -> turns (stats page)
+
+	commitMsgRepo    repo.Repo // repo a headless commit message is being drafted for
+	commitMsg        string    // the drafted message
+	commitMsgErr     string    // draft failure, if any
+	commitMsgLoading bool      // claude -p is still running
+	commitMsgCopied  bool      // message was copied to the clipboard
+	commitMsgFrame   int       // animation frame for the drafting indicator
+
 	searchInput   textinput.Model
 	searchVP      viewport.Model
 	searchResults []search.Result
@@ -212,10 +227,11 @@ type statusMsg struct {
 }
 
 type detailMsg struct {
-	path  string
-	info  orchardgit.DetailInfo
-	langs []lang.Stat
-	err   error
+	path     string
+	info     orchardgit.DetailInfo
+	langs    []lang.Stat
+	sessions []claude.Session
+	err      error
 }
 
 type claudeStatsMsg struct {
@@ -370,10 +386,10 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 	m.detailRepo = target.Path
 	if demoMode() {
 		m.ghStatus = demoGHStatus()
-		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path)}
+		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path), sessions: demoSessions()}
 	} else {
 		info, _ := orchardgit.Detail(ctx, target)
-		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path)}
+		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path), sessions: claude.Sessions(target.Path, 10)}
 	}
 	m.setDetailContent()
 	return m.View(), nil
@@ -591,6 +607,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case commitTickMsg:
+		if m.mode == modeCommitMsg && m.commitMsgLoading {
+			m.commitMsgFrame++
+			return m, commitTick()
+		}
+		return m, nil
+
 	case idleTickMsg:
 		if msg.gen != m.idleGen {
 			return m, nil // superseded by a fresher tick
@@ -642,6 +665,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ghStatusMsg:
 		m.ghStatus = msg.byPath
 		m.syncRows() // a failing-CI flag may now show in the info column
+		return m, nil
+
+	case statsMsg:
+		m.statsLoading = false
+		m.statsHarvest = msg.harvest
+		m.statsClaude = msg.claude
+		if m.mode == modeStats {
+			m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
+		}
+		return m, nil
+
+	case commitMsgMsg:
+		if msg.path == m.commitMsgRepo.Path {
+			m.commitMsgLoading = false
+			if msg.err != nil {
+				m.commitMsgErr = "could not draft: " + msg.err.Error()
+			} else if strings.TrimSpace(msg.text) == "" {
+				m.commitMsgErr = "the assistant returned an empty message"
+			} else {
+				m.commitMsg = msg.text
+			}
+		}
 		return m, nil
 
 	case diffMsg:
@@ -706,7 +751,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detailMsg:
 		if msg.path == m.detailRepo {
-			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs}
+			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions}
 			if msg.err != nil {
 				st.err = msg.err.Error()
 			} else {
@@ -752,6 +797,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSessionsKey(msg)
 		case modeDiff:
 			return m.handleDiffKey(msg)
+		case modeStats:
+			return m.handleStatsKey(msg)
+		case modeCommitMsg:
+			return m.handleCommitMsgKey(msg)
 		case modeSearch:
 			return m.handleSearchKey(msg)
 		case modeDetail:
@@ -794,6 +843,9 @@ func (m *model) resize() {
 	if m.mode == modeDiff {
 		m.detailVP.SetContent(colorizeDiff(m.diffText, m.detailVP.Width))
 	}
+	if m.mode == modeStats {
+		m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
+	}
 }
 
 func (m model) innerWidth() int {
@@ -814,8 +866,12 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.branchView(inner), inner))
 	case modeSessions:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.sessionsView(inner), inner))
+	case modeCommitMsg:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.commitMsgView(inner), inner))
 	case modeDiff:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
+	case modeStats:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.statsView(inner))
 	case modeHelp:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.helpView(inner))
 	case modeWorklog:

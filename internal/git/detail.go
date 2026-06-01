@@ -93,7 +93,12 @@ func Detail(ctx context.Context, r repo.Repo) (DetailInfo, error) {
 			if idx := strings.LastIndex(line, " ("); idx != -1 {
 				line = line[:idx]
 			}
-			line = strings.Join(strings.Fields(line), "  ")
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				// strip any embedded token (https://user:tok@host/…) before display
+				fields[len(fields)-1] = stripCredentials(fields[len(fields)-1])
+			}
+			line = strings.Join(fields, "  ")
 			if !seen[line] {
 				seen[line] = true
 				info.Remotes = append(info.Remotes, line)

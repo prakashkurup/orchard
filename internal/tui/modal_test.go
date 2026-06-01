@@ -10,6 +10,7 @@ import (
 
 	"github.com/prakashkurup/orchard/internal/editor"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
+	"github.com/prakashkurup/orchard/internal/repo"
 )
 
 func modalCases() []struct {
@@ -38,6 +39,17 @@ func modalCases() []struct {
 			}
 		}},
 		{"clone", func(m *model) { m.mode = modeClone }},
+		{"commitMsg", func(m *model) {
+			m.mode = modeCommitMsg
+			m.commitMsgRepo = repo.Repo{Name: "acme-web", Path: "/tmp/acme-web"}
+			m.commitMsg = "feat(checkout): apply promo codes to the order summary\n\n" +
+				"Wire the promo field into buildCheckoutSummary and format the discounted total in SummaryCard."
+		}},
+		{"commitMsgLoading", func(m *model) {
+			m.mode = modeCommitMsg
+			m.commitMsgRepo = repo.Repo{Name: "acme-web", Path: "/tmp/acme-web"}
+			m.commitMsgLoading = true
+		}},
 	}
 }
 

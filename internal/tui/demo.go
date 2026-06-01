@@ -163,6 +163,32 @@ index 1122334..5566778 100644
  }`
 }
 
+// demoCommitMsg is the fabricated draft shown for the commit-message window in
+// demo mode (matches demoDiff).
+func demoCommitMsg() string {
+	return "feat(checkout): apply promo codes to the order summary\n\n" +
+		"Wire the promo field into buildCheckoutSummary and format the\n" +
+		"discounted total in SummaryCard."
+}
+
+// demoStatsData returns fabricated per-day commit and Claude-turn counts for the
+// stats page heatmaps (deterministic, weighted toward recent days).
+func demoStatsData() (harvest, claudeTurns map[string]int) {
+	harvest = map[string]int{}
+	claudeTurns = map[string]int{}
+	now := time.Now()
+	for d := 0; d < 7*statsWeeks; d++ {
+		day := now.AddDate(0, 0, -d).Format("2006-01-02")
+		if (d*7+3)%5 == 0 {
+			harvest[day] = 1 + d%4
+		}
+		if d < 45 && (d*3)%4 == 0 {
+			claudeTurns[day] = 10 + (d*7)%120
+		}
+	}
+	return harvest, claudeTurns
+}
+
 // demoGHStatus returns fabricated GitHub PR/CI status for a few demo repos.
 func demoGHStatus() map[string]github.RepoStatus {
 	return map[string]github.RepoStatus{

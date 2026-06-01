@@ -60,6 +60,42 @@ func TestDetailPreservesStatusLeadingColumn(t *testing.T) {
 	}
 }
 
+func TestStripCredentials(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://x-access-token:ghp_SECRET@github.com/a/b.git", "https://github.com/a/b.git"},
+		{"https://user:pw@example.com/a/b", "https://example.com/a/b"},
+		{"https://github.com/a/b.git", "https://github.com/a/b.git"}, // nothing to strip
+		{"git@github.com:a/b.git", "git@github.com:a/b.git"},         // scp-style SSH: keep as-is
+	}
+	for _, c := range cases {
+		if got := stripCredentials(c.in); got != c.want {
+			t.Errorf("stripCredentials(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDetailStripsRemoteCredentials(t *testing.T) {
+	ctx := context.Background()
+	local := t.TempDir()
+	git(t, local, "init")
+	git(t, local, "remote", "add", "origin", "https://user:ghp_TOKEN123@github.com/acme/web.git")
+	writeFile(t, filepath.Join(local, "f.txt"), "x\n")
+	git(t, local, "add", "-A")
+	git(t, local, "commit", "-m", "init")
+
+	info, err := Detail(ctx, repo.Repo{Name: "local", Path: local})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(info.Remotes, " ")
+	if strings.Contains(joined, "ghp_TOKEN123") || strings.Contains(joined, "user:") {
+		t.Fatalf("remote credentials were not stripped: %q", joined)
+	}
+	if !strings.Contains(joined, "github.com/acme/web.git") {
+		t.Fatalf("expected scrubbed remote URL, got %q", joined)
+	}
+}
+
 func TestFilterByName(t *testing.T) {
 	repos := []repo.Repo{{Name: "payments-web"}, {Name: "auth-gateway"}, {Name: "payments-api"}}
 	got, err := FilterByName(repos, "^payments")

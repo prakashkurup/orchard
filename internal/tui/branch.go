@@ -24,6 +24,7 @@ func (m model) openBranchSwitcher(r repo.Repo) (tea.Model, tea.Cmd) {
 	m.branchErr = ""
 	m.branchTarget = ""
 	m.branchInput.SetValue("")
+	m.returnMode = m.mode
 	m.mode = modeBranch
 	return m, tea.Batch(m.branchInput.Focus(), branchesCmd(r))
 }
@@ -92,7 +93,7 @@ func (m model) handleBranchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
-		m.mode = modeList
+		m.mode = m.returnMode
 		m.branchInput.Blur()
 		m.branchErr = ""
 		m.branchTarget = ""
@@ -118,7 +119,7 @@ func (m model) handleBranchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		b := fb[m.branchCursor]
 		r := m.repoByPath(m.branchRepo)
 		if b.Current {
-			m.mode = modeList
+			m.mode = m.returnMode
 			m.branchInput.Blur()
 			m.status = "already on " + b.Name
 			return m, nil

@@ -103,6 +103,12 @@ func overlayCenter(box, backdrop string, width, height int) string {
 // overlayModal floats a modal box over the dimmed dashboard so there is context
 // behind it instead of a dark void with letterbox bands above and below.
 func (m model) overlayModal(box string, inner int) string {
-	backdrop := dimANSI(m.dashboardBody(inner), backdropNum, backdropDen)
+	// dim the view the modal was opened over (the detail page when it came from
+	// there, otherwise the dashboard) so closing returns you to the same place
+	base := m.dashboardBody(inner)
+	if m.returnMode == modeDetail && m.detail != nil {
+		base = m.detailView(inner)
+	}
+	backdrop := dimANSI(base, backdropNum, backdropDen)
 	return overlayCenter(box, backdrop, inner, max(1, m.height-2))
 }

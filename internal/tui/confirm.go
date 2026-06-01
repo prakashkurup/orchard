@@ -38,6 +38,7 @@ func (m model) requestBrowser(targets []repo.Repo) (tea.Model, tea.Cmd) {
 }
 
 func (m model) enterConfirm(kind confirmKind, targets []repo.Repo) (tea.Model, tea.Cmd) {
+	m.returnMode = m.mode
 	m.mode = modeConfirm
 	m.confirmKind = kind
 	m.confirmRepos = targets

@@ -33,11 +33,12 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 
 - **Usage panel** pinned under the list: total sessions, turns, repos used, last active, a model split, and your busiest repos.
 - **Per-repo CLAUDE column**: how long ago Claude last ran in each repo, colored by recency.
+- **Per-repo footprint in the detail view** (`enter`): that repo's recent sessions, total turns and tokens, and when Claude last ran there.
 - **Uncommitted-work flag**: when a repo is dirty *and* Claude ran there recently, the CLAUDE cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
 - **Launch** (`c`): open Claude Code in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
 - **Resume** (`C`): continue the most recent session in the current repo (`claude --continue`).
 - **Session history** (`H`): browse a repo's past sessions by their titles (turn count, model, age) and resume any one (`claude --resume <id>`).
-- **Draft a commit message** (`M`): launch Claude in the repo with a prompt to write a commit message from the current changes.
+- **Draft a commit message** (`M`): Claude Code drafts a message from the working-tree diff *headlessly* (`claude -p`) and shows it in a window you can copy (`y`) or regenerate (`r`), without leaving the dashboard. Other assistants fall back to a terminal session.
 - **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first.
 - **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
 - **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
@@ -117,11 +118,12 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 | `C` | resume the last Claude Code session in the current repo |
 | `H` | browse past Claude Code sessions for the current repo and resume any one |
 | `A` | one Claude Code session across the selected repos: opens in the first selected, the rest attached via `--add-dir` (`space`-select 2+ first) |
-| `M` | draft a commit message with Claude Code for the current repo |
+| `M` | draft a commit message (Claude Code drafts it in a window to copy / regenerate) |
 | `e` / `E` | open in editor / change default editor |
 | `O` | open repo(s) in browser (confirms for >1 repo) |
 | `S` | search code across all repos |
 | `L` | worklog - your commits across repos |
+| `T` | stats page (languages, freshest/thirstiest, Claude usage, harvest + Claude heatmaps) |
 | `+` | clone a repo into the dashboard |
 | `/` | filter by name · `tab` cycle quick filters |
 | `s` / `o` | cycle sort (attention / name / synced / claude) / toggle grouping |
@@ -171,11 +173,16 @@ scope:
 
 ## Security & privacy
 
-orchard runs locally with no telemetry. The only network traffic is `git` talking to your remotes, plus the GitHub API when you run `orchard clone`.
+orchard runs locally with no telemetry. Network traffic only happens when you ask for it:
 
-- The GitHub token is read from `GITHUB_TOKEN` or `gh auth token` at the moment it's needed; it is **never written to disk or printed**.
-- The Claude usage panel only **reads** your local `~/.claude` transcript files; nothing is sent anywhere.
-- Pulls are **fast-forward only** and skip dirty repos - orchard never force-pushes, rebases, or discards work.
+- `git` talking to your remotes (fetch / pull / clone).
+- the **GitHub API** for open-PR and CI status, and for `orchard clone`.
+- **Claude Code**, when you launch it (`c` / `C` / `H` / `A`) or draft a commit message (`M`, which runs `claude -p` and sends the working-tree diff to Claude). The usage panel, CLAUDE column, and stats only **read** your local `~/.claude` transcripts - nothing is sent for those.
+
+Privacy details:
+
+- The GitHub token is read from `GITHUB_TOKEN` or `gh auth token` at the moment it's needed; it is **never written to disk or printed**, and tokens embedded in a remote URL are stripped before the URL is shown or opened.
+- Pulls are **fast-forward only** and skip dirty repos - orchard never force-pushes, rebases, or discards work, and it never commits or pushes on your behalf.
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 

@@ -62,6 +62,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.jumpToNextNew()
 	case "+":
+		m.returnMode = m.mode
 		m.mode = modeClone
 		m.cloneInput.SetValue("")
 		m.status = ""
@@ -137,12 +138,14 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "M":
 		if r, ok := m.currentRepo(); ok {
-			return m.openClaudeCommitMessage(r)
+			return m.openCommitMessage(r)
 		}
 	case "d":
 		if r, ok := m.currentRepo(); ok {
 			return m.openDiff(r)
 		}
+	case "T":
+		return m.openStats()
 	case "b":
 		if r, ok := m.currentRepo(); ok {
 			return m.openBranchSwitcher(r)

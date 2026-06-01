@@ -32,6 +32,7 @@ func (m model) openEditor(r repo.Repo, forcePick bool) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.editorRepo = r.Path
+	m.returnMode = m.mode
 	m.mode = modeEditor
 	return m, nil
 }
@@ -41,7 +42,7 @@ func (m model) handleEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "q":
-		m.mode = modeList
+		m.mode = m.returnMode
 		return m, nil
 	case "up", "k":
 		m.editorCursor = clamp(m.editorCursor-1, 0, len(m.editorPick)-1)
@@ -49,14 +50,14 @@ func (m model) handleEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editorCursor = clamp(m.editorCursor+1, 0, len(m.editorPick)-1)
 	case "enter":
 		if m.editorCursor < 0 || m.editorCursor >= len(m.editorPick) {
-			m.mode = modeList
+			m.mode = m.returnMode
 			return m, nil
 		}
 		e := m.editorPick[m.editorCursor]
 		m.editorID = e.ID
 		_ = editor.SaveDefault(e.ID)
 		r := m.repoByPath(m.editorRepo)
-		m.mode = modeList
+		m.mode = m.returnMode
 		return m.launchEditor(e, r)
 	}
 	// number shortcuts 1-9
@@ -65,7 +66,7 @@ func (m model) handleEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editorID = e.ID
 		_ = editor.SaveDefault(e.ID)
 		r := m.repoByPath(m.editorRepo)
-		m.mode = modeList
+		m.mode = m.returnMode
 		return m.launchEditor(e, r)
 	}
 	return m, nil
