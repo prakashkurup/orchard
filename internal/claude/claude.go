@@ -8,9 +8,11 @@ package claude
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +23,22 @@ type Session struct {
 	ID        string
 	Modified  time.Time
 	Model     string
-	Assistant int // count of assistant turns
+	Assistant int    // count of assistant turns
+	Title     string // Claude's "ai-title" summary, or a fallback from the last prompt
+	Tokens    int    // total tokens (input + output + cache) across the session
+}
+
+// DisplayTitle is a human label for the session: its ai-title, else a trimmed
+// last prompt, else a short form of the session id.
+func (s Session) DisplayTitle() string {
+	switch {
+	case strings.TrimSpace(s.Title) != "":
+		return s.Title
+	case len(s.ID) >= 8:
+		return "session " + s.ID[:8]
+	default:
+		return "session"
+	}
 }
 
 func encode(p string) string {
@@ -144,6 +161,7 @@ func parseSession(path string, s *Session) {
 	}
 	defer file.Close()
 
+	var lastPrompt string
 	r := bufio.NewReader(file)
 	for {
 		line, err := r.ReadString('\n') // handles arbitrarily long lines (base64 images, etc.)
@@ -154,11 +172,74 @@ func parseSession(path string, s *Session) {
 			if m := extract(line, `"model":"`); m != "" && m != "<synthetic>" {
 				s.Model = m
 			}
+			// token usage lives on assistant lines; the contains-guard keeps the
+			// (cost-bearing) integer scans off lines that have no usage block.
+			if strings.Contains(line, `"output_tokens":`) {
+				s.Tokens += extractInt(line, `"input_tokens":`) +
+					extractInt(line, `"output_tokens":`) +
+					extractInt(line, `"cache_creation_input_tokens":`) +
+					extractInt(line, `"cache_read_input_tokens":`)
+			}
+			// The title and last-prompt lines are small; JSON-parse them so titles
+			// containing quotes or escapes survive intact (the cheap string scan
+			// above can't). Other (possibly huge) lines are never parsed.
+			if strings.Contains(line, `"type":"ai-title"`) {
+				var t struct {
+					AiTitle string `json:"aiTitle"`
+				}
+				if json.Unmarshal([]byte(line), &t) == nil && t.AiTitle != "" {
+					s.Title = t.AiTitle
+				}
+			} else if strings.Contains(line, `"type":"last-prompt"`) {
+				var p struct {
+					LastPrompt string `json:"lastPrompt"`
+				}
+				if json.Unmarshal([]byte(line), &p) == nil {
+					lastPrompt = p.LastPrompt
+				}
+			}
 		}
 		if err != nil {
 			break
 		}
 	}
+	if s.Title == "" {
+		s.Title = firstLine(lastPrompt)
+	}
+}
+
+// firstLine returns the first non-empty line of s, trimmed, for use as a fallback
+// session title when Claude has not generated an ai-title yet.
+func firstLine(s string) string {
+	for _, ln := range strings.Split(s, "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			return ln
+		}
+	}
+	return ""
+}
+
+// extractInt reads the integer immediately following key in line (0 if absent),
+// e.g. extractInt(`"output_tokens": 1234`, `"output_tokens":`) == 1234.
+func extractInt(line, key string) int {
+	i := strings.Index(line, key)
+	if i < 0 {
+		return 0
+	}
+	rest := line[i+len(key):]
+	j := 0
+	for j < len(rest) && rest[j] == ' ' {
+		j++
+	}
+	k := j
+	for k < len(rest) && rest[k] >= '0' && rest[k] <= '9' {
+		k++
+	}
+	if k == j {
+		return 0
+	}
+	n, _ := strconv.Atoi(rest[j:k])
+	return n
 }
 
 func extract(line, key string) string {
@@ -186,6 +267,7 @@ type RepoUsage struct {
 	Path     string
 	Sessions int
 	Turns    int
+	Tokens   int
 	Last     time.Time
 }
 
@@ -193,6 +275,7 @@ type RepoUsage struct {
 type Usage struct {
 	TotalSessions int
 	TotalTurns    int
+	TotalTokens   int
 	ReposUsed     int
 	Models        map[string]int // pretty model -> assistant turns
 	Repos         []RepoUsage    // sorted by turns desc
@@ -222,6 +305,7 @@ func Aggregate(targets []Target) Usage {
 			for _, s := range sessions {
 				r.ru.Sessions++
 				r.ru.Turns += s.Assistant
+				r.ru.Tokens += s.Tokens
 				if s.Modified.After(r.ru.Last) {
 					r.ru.Last = s.Modified
 				}
@@ -240,6 +324,7 @@ func Aggregate(targets []Target) Usage {
 		}
 		u.TotalSessions += r.ru.Sessions
 		u.TotalTurns += r.ru.Turns
+		u.TotalTokens += r.ru.Tokens
 		u.ReposUsed++
 		if r.ru.Last.After(u.Last) {
 			u.Last = r.ru.Last

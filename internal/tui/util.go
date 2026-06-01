@@ -185,6 +185,18 @@ func fitLeft(s string, width int) string {
 	return ell + out
 }
 
+// humanTokens formats a token count compactly: 1234 -> "1.2k", 1234567 -> "1.2M".
+func humanTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 func clamp(n, lo, hi int) int {
 	if n < lo {
 		return lo

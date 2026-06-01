@@ -70,6 +70,45 @@ func TestSummaryIncludesSubdirs(t *testing.T) {
 	}
 }
 
+func TestSessionTitle(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoPath := "/Users/me/Documents/GitHub/bar"
+	dir := filepath.Join(home, ".claude", "projects", encode(repoPath))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// session with an ai-title (and two assistant turns carrying token usage)
+	write("s1.jsonl", `{"type":"ai-title","aiTitle":"Add retry logic to the worker","sessionId":"s1"}`+"\n"+
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`+"\n"+
+		`{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":200,"output_tokens":80}}}`+"\n")
+	// session with only a last-prompt -> title falls back to its first line
+	write("s2.jsonl", `{"type":"last-prompt","lastPrompt":"fix the flaky test\nplease","sessionId":"s2"}`+"\n"+
+		`{"type":"assistant","message":{"model":"claude-sonnet-4-6"}}`+"\n")
+
+	byID := map[string]Session{}
+	for _, s := range Sessions(repoPath, 0) {
+		byID[s.ID] = s
+	}
+	if got := byID["s1"].Title; got != "Add retry logic to the worker" {
+		t.Errorf("s1 title = %q, want the ai-title", got)
+	}
+	if got := byID["s1"].Assistant; got != 2 {
+		t.Errorf("s1 turns = %d, want 2", got)
+	}
+	if got := byID["s1"].Tokens; got != 445 { // (100+50+10+5) + (200+80)
+		t.Errorf("s1 tokens = %d, want 445", got)
+	}
+	if got := byID["s2"].Title; got != "fix the flaky test" {
+		t.Errorf("s2 title = %q, want the first line of the last prompt", got)
+	}
+}
+
 func TestAggregate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

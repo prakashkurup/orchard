@@ -21,6 +21,7 @@ If you juggle many repositories and lean on Claude Code, orchard is the cockpit 
 - **Fetch, branch switch, multi-select** - act on one repo or many at once.
 - **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or **Claude Code** (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
 - **Cross-repo code search** (`S`) that respects `.gitignore`.
+- **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
 - **Worklog** (`L`) - your own commits across all repos in a time window.
 - **Clone** (`+`) a new repo into the dashboard, or `orchard clone` a scoped GitHub org.
 - **Claude Code aware** - usage panel, a per-repo activity column, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code](#claude-code) below.
@@ -35,8 +36,11 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 - **Uncommitted-work flag**: when a repo is dirty *and* Claude ran there recently, the CLAUDE cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
 - **Launch** (`c`): open Claude Code in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
 - **Resume** (`C`): continue the most recent session in the current repo (`claude --continue`).
+- **Session history** (`H`): browse a repo's past sessions by their titles (turn count, model, age) and resume any one (`claude --resume <id>`).
+- **Draft a commit message** (`M`): launch Claude in the repo with a prompt to write a commit message from the current changes.
 - **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first.
 - **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
+- **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
 - **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `copilot` found on your `PATH`.
 
 ## Requirements
@@ -105,12 +109,15 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 | `space` / `a` | select current / select all visible |
 | `x` | clear all selections |
 | `enter` | repo detail (status, commit graph, remotes, languages) |
+| `d` | view the working-tree diff (vs HEAD) |
 | `p` / `P` | pull selected / all (fast-forward only) |
 | `f` / `F` | fetch selected / all |
 | `b` | switch branch |
 | `c` | open Claude Code in a new tab (confirms for >1 repo) |
 | `C` | resume the last Claude Code session in the current repo |
+| `H` | browse past Claude Code sessions for the current repo and resume any one |
 | `A` | one Claude Code session across the selected repos: opens in the first selected, the rest attached via `--add-dir` (`space`-select 2+ first) |
+| `M` | draft a commit message with Claude Code for the current repo |
 | `e` / `E` | open in editor / change default editor |
 | `O` | open repo(s) in browser (confirms for >1 repo) |
 | `S` | search code across all repos |

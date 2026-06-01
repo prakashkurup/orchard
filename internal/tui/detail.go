@@ -49,6 +49,12 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openClaude([]repo.Repo{m.repoByPath(m.detailRepo)})
 	case "C":
 		return m.openClaudeResume(m.repoByPath(m.detailRepo))
+	case "H":
+		return m.openSessions(m.repoByPath(m.detailRepo))
+	case "M":
+		return m.openClaudeCommitMessage(m.repoByPath(m.detailRepo))
+	case "d":
+		return m.openDiff(m.repoByPath(m.detailRepo))
 	case "b":
 		return m.openBranchSwitcher(m.repoByPath(m.detailRepo))
 	case "e":
@@ -127,6 +133,26 @@ func (m model) detailBody(width int) string {
 			parts += seg(l.Color, glyph+" ") + seg(ice, l.Name) + seg(muted, fmt.Sprintf(" %d%%", l.Pct))
 		}
 		rows = append(rows, line(segB(blue, "  "+iconCommit+"  Languages")), line(parts))
+	}
+
+	// GitHub - open PRs + CI status (only when fetched for this repo)
+	if st, ok := m.ghStatus[m.detailRepo]; ok && (st.OpenPRs > 0 || st.CIState != "") {
+		rows = append(rows, blank, line(segB(blue, "  "+iconRemote+"  GitHub")))
+		ciColor, ciText := muted, "no CI"
+		switch st.CIState {
+		case "passing":
+			ciColor, ciText = green, iconCheck+" CI passing"
+		case "failing":
+			ciColor, ciText = red, "× CI failing"
+		case "pending":
+			ciColor, ciText = yellow, "● CI running"
+		}
+		rows = append(rows, line(seg(ciColor, "    "+ciText)+
+			seg(muted, fmt.Sprintf("    ·    %d open PR%s", st.OpenPRs, pluralSuffix(st.OpenPRs)))))
+		for _, pr := range st.PRs {
+			rows = append(rows, line(seg(muted, "      #")+segB(ice, fmt.Sprintf("%d ", pr.Number))+
+				seg(muted, fit(pr.Title, max(10, width-14)))))
+		}
 	}
 
 	// working tree - grouped by change type, with file-type icons
@@ -325,7 +351,8 @@ func (m model) detailView(width int) string {
 	rule := hrule(width)
 	hints := fillLine(strings.Join([]string{
 		cmdHint("esc", "back"), cmdHint("↑↓", "scroll"), cmdHint("p", "pull"),
-		cmdHint("c", "claude"), cmdHint("e", "editor"), cmdHint("O", "browser"),
+		cmdHint("c", "claude"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
+		cmdHint("M", "commit msg"), cmdHint("e", "editor"), cmdHint("O", "browser"),
 	}, ""), width, bg)
 
 	return lipgloss.JoinVertical(lipgloss.Left,

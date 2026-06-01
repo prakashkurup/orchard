@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/prakashkurup/orchard/internal/claude"
 	"github.com/prakashkurup/orchard/internal/config"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	orchardgithub "github.com/prakashkurup/orchard/internal/github"
@@ -502,58 +503,58 @@ func runStats(args []string, cfg config.Config) error {
 	if thirstiest.Path != "" && thirstiest.Path != freshest.Path {
 		fmt.Printf("  %s %-26s %s\n", st(cMuted).Render(fmt.Sprintf("%-11s", "thirstiest")), thirstiest.Name, st(cMuted).Render(statsAgo(thirstiest.LastFetched)))
 	}
+	targets := make([]claude.Target, 0, len(repos))
+	for _, r := range repos {
+		targets = append(targets, claude.Target{Name: r.Name, Path: r.Path})
+	}
+	if u := claude.Aggregate(targets); u.TotalSessions > 0 {
+		fmt.Printf("\n  %s   %s\n", st(cMuted).Render("claude"),
+			st(cMuted).Render(fmt.Sprintf("%d sessions · %d turns · %s tokens", u.TotalSessions, u.TotalTurns, humanInt(u.TotalTokens))))
+	}
 	if hm := harvestHeatmap(ctx, repos); hm != "" {
+		fmt.Print(hm)
+	}
+	if hm := claudeHeatmap(repos); hm != "" {
 		fmt.Print(hm)
 	}
 	fmt.Println()
 	return nil
 }
 
-// heatWeeks is how many weeks the harvest heatmap spans.
+// heatWeeks is how many weeks the contribution heatmaps span.
 const heatWeeks = 20
 
-// harvestHeatmap renders a GitHub-style contribution grid of your own commits
-// across all repos over the last heatWeeks weeks: weeks as columns, weekdays as
-// rows, shaded by daily commit count. Returns "" when you have no commits.
-func harvestHeatmap(ctx context.Context, repos []repo.Repo) string {
-	since := fmt.Sprintf("%d weeks ago", heatWeeks+1)
-	counts := map[string]int{}
-	total := 0
-	for _, r := range repos {
-		for _, d := range orchardgit.AuthoredDays(ctx, r.Path, since) {
-			counts[d]++
-			total++
-		}
-	}
+// renderHeatmap draws a GitHub-style contribution grid (weeks as columns,
+// weekdays as rows) from per-day counts. Returns "" when total is 0. ramp holds
+// four colors (dark -> bright); thresholds are the upper bounds for the first
+// three shades, anything above uses the brightest.
+func renderHeatmap(label, sub string, counts map[string]int, total int, thresholds [3]int, ramp [4]string) string {
 	if total == 0 {
 		return ""
 	}
 	st := func(hex string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)) }
 	const cMuted = "#767DA8"
-	ramp := []string{"#356E3F", "#5FA052", "#8FD15A", "#B6F36A"} // dark -> bright green
 	empty := st("#3A3F58").Render("·")
 	cell := func(n int) string {
 		switch {
 		case n <= 0:
 			return empty
-		case n <= 2:
+		case n <= thresholds[0]:
 			return st(ramp[0]).Render("■")
-		case n <= 5:
+		case n <= thresholds[1]:
 			return st(ramp[1]).Render("■")
-		case n <= 9:
+		case n <= thresholds[2]:
 			return st(ramp[2]).Render("■")
 		default:
 			return st(ramp[3]).Render("■")
 		}
 	}
 	now := time.Now()
-	weekStart := now.AddDate(0, 0, -int(now.Weekday())) // this week's Sunday
-	first := weekStart.AddDate(0, 0, -7*(heatWeeks-1))
+	first := now.AddDate(0, 0, -int(now.Weekday())).AddDate(0, 0, -7*(heatWeeks-1))
 	labels := []string{"", "Mon", "", "Wed", "", "Fri", ""}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n  %s   %s\n", st(cMuted).Render("harvest"),
-		st(cMuted).Render(fmt.Sprintf("%d commits in the last %d weeks", total, heatWeeks)))
+	fmt.Fprintf(&b, "\n  %s   %s\n", st(cMuted).Render(label), st(cMuted).Render(sub))
 	for row := 0; row < 7; row++ {
 		fmt.Fprintf(&b, "  %-4s", labels[row])
 		for col := 0; col < heatWeeks; col++ {
@@ -570,6 +571,51 @@ func harvestHeatmap(ctx context.Context, repos []repo.Repo) string {
 		empty, st(ramp[0]).Render("■"), st(ramp[1]).Render("■"), st(ramp[2]).Render("■"), st(ramp[3]).Render("■"),
 		st(cMuted).Render("more"))
 	return b.String()
+}
+
+// harvestHeatmap is your own commits per day over the last heatWeeks weeks.
+func harvestHeatmap(ctx context.Context, repos []repo.Repo) string {
+	since := fmt.Sprintf("%d weeks ago", heatWeeks+1)
+	counts := map[string]int{}
+	total := 0
+	for _, r := range repos {
+		for _, d := range orchardgit.AuthoredDays(ctx, r.Path, since) {
+			counts[d]++
+			total++
+		}
+	}
+	return renderHeatmap("harvest", fmt.Sprintf("%d commits in the last %d weeks", total, heatWeeks),
+		counts, total, [3]int{2, 5, 9}, [4]string{"#356E3F", "#5FA052", "#8FD15A", "#B6F36A"})
+}
+
+// claudeHeatmap is your Claude Code turns per day over the last heatWeeks weeks.
+func claudeHeatmap(repos []repo.Repo) string {
+	cutoff := time.Now().AddDate(0, 0, -7*heatWeeks)
+	counts := map[string]int{}
+	total := 0
+	for _, r := range repos {
+		for _, s := range claude.Sessions(r.Path, 0) {
+			if s.Modified.Before(cutoff) {
+				continue
+			}
+			counts[s.Modified.Format("2006-01-02")] += s.Assistant
+			total += s.Assistant
+		}
+	}
+	return renderHeatmap("claude", fmt.Sprintf("%d turns in the last %d weeks", total, heatWeeks),
+		counts, total, [3]int{20, 50, 100}, [4]string{"#7A4A1E", "#B5742E", "#E0973F", "#FF9E64"})
+}
+
+// humanInt formats a large count compactly: 1234 -> "1.2k", 1234567 -> "1.2M".
+func humanInt(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 func statsAgo(t time.Time) string {

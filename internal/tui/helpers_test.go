@@ -198,6 +198,15 @@ func TestSparklineWidthAndDormant(t *testing.T) {
 	}
 }
 
+func TestHumanTokens(t *testing.T) {
+	cases := map[int]string{0: "0", 42: "42", 999: "999", 1500: "1.5k", 1_234_567: "1.2M"}
+	for in, want := range cases {
+		if got := humanTokens(in); got != want {
+			t.Errorf("humanTokens(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestDisplayRootAbbreviatesHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

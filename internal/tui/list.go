@@ -131,6 +131,18 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.openClaudeCombined(m.selectionTargets())
+	case "H":
+		if r, ok := m.currentRepo(); ok {
+			return m.openSessions(r)
+		}
+	case "M":
+		if r, ok := m.currentRepo(); ok {
+			return m.openClaudeCommitMessage(r)
+		}
+	case "d":
+		if r, ok := m.currentRepo(); ok {
+			return m.openDiff(r)
+		}
 	case "b":
 		if r, ok := m.currentRepo(); ok {
 			return m.openBranchSwitcher(r)
@@ -394,7 +406,7 @@ func (m model) renderGrid(width int) string {
 		current := vi == m.cursor
 		alt := rowIdx%2 == 1
 		pulling := m.pulling[r.Path]
-		lines = append(lines, renderRow(r, m.selected[r.Path], current, alt, pulling, m.spinner.View(), m.newByPath[r.Path], m.langByPath[r.Path], layout))
+		lines = append(lines, renderRow(r, m.selected[r.Path], current, alt, pulling, m.spinner.View(), m.newByPath[r.Path], m.langByPath[r.Path], m.ghStatus[r.Path].CIState == "failing", layout))
 		rowIdx++
 	}
 	return strings.Join(lines, "\n")
@@ -417,12 +429,12 @@ func renderRows(repos []repo.Repo, selected map[string]bool, cursor, width int) 
 	layout := gridLayout(width)
 	lines := make([]string, 0, len(repos))
 	for i, r := range repos {
-		lines = append(lines, renderRow(r, selected[r.Path], i == cursor, i%2 == 1, false, "", 0, lang.Stat{}, layout))
+		lines = append(lines, renderRow(r, selected[r.Path], i == cursor, i%2 == 1, false, "", 0, lang.Stat{}, false, layout))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, newCount int, lng lang.Stat, layout gridColumns) string {
+func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, newCount int, lng lang.Stat, ghFailing bool, layout gridColumns) string {
 	info := r.LastCommit
 	if r.SkipReason != "" {
 		info = r.SkipReason
@@ -517,6 +529,13 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 	// visit; otherwise a freshness-coloured commit age + subject (no washed-out
 	// grey). The plain fallback (from the loop) covers pulling / skip / no-commit.
 	switch {
+	case ghFailing && !pulling:
+		// failing CI is the most urgent at-a-glance signal, so it takes the info cell
+		badge := "× CI "
+		rest := fit("· "+info, max(2, layout.info-runewidth.StringWidth(badge)))
+		pad := max(0, layout.info-runewidth.StringWidth(badge)-runewidth.StringWidth(rest))
+		out[9] = cellStyle(red, bgColor, true).Render(badge) +
+			cellStyle(infoColor(r, pulling), bgColor, false).Render(rest+strings.Repeat(" ", pad))
 	case newCount > 0 && !pulling:
 		badge := fmt.Sprintf("↑%d new ", newCount)
 		rest := fit("· "+info, max(2, layout.info-runewidth.StringWidth(badge)))

@@ -141,6 +141,25 @@ func (m model) openClaudeCombined(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	return m.runAssistant(targets[0].Path, args, status)
 }
 
+// commitMsgPrompt is the starting prompt for Claude when drafting a commit message.
+const commitMsgPrompt = "Write a concise git commit message for the staged changes " +
+	"(or the whole working tree if nothing is staged). Conventional style, imperative mood, " +
+	"no body unless it adds value. Show the message in a code block; do not commit anything."
+
+// openClaudeCommitMessage launches Claude in a repo with a prompt to draft a
+// commit message from the current changes (Claude only).
+func (m model) openClaudeCommitMessage(r repo.Repo) (tea.Model, tea.Cmd) {
+	if m.assistantCmd == "" {
+		m.status = "no AI assistant found (install claude or set ORCHARD_AI_CMD)"
+		return m, nil
+	}
+	if !m.assistantIsClaude() {
+		m.status = "commit-message drafting needs Claude Code"
+		return m, nil
+	}
+	return m.runAssistant(r.Path, []string{commitMsgPrompt}, "drafting a commit message · "+r.Name)
+}
+
 func claudeStatsCmd(repos []repo.Repo) tea.Cmd {
 	if demoMode() {
 		return func() tea.Msg { return claudeStatsMsg{usage: demoClaude()} }
@@ -182,6 +201,7 @@ func (m model) claudePanel(width int) string {
 	sp := seg(muted, "    ")
 	chips := chip(iconBolt, fmt.Sprintf("%d", u.TotalSessions), "sessions", blue) + sp +
 		chip(iconCommit, fmt.Sprintf("%d", u.TotalTurns), "turns", green) + sp +
+		chip(iconCommit, humanTokens(u.TotalTokens), "tokens", teal) + sp +
 		chip(iconFolder, fmt.Sprintf("%d", u.ReposUsed), "repos", accent) + sp +
 		chip(iconClock, relTime(u.Last), "ago", claudeC)
 	l1 := marker + title + seg(bg, "   ") + chips

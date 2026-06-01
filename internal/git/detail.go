@@ -157,6 +157,17 @@ func AuthoredDays(ctx context.Context, path, since string) []string {
 	return days
 }
 
+// Diff returns the working-tree diff against HEAD (staged + unstaged) for the
+// inline diff viewer; an empty string means a clean tree. Falls back to a plain
+// diff when the repo has no commits yet (no HEAD).
+func Diff(ctx context.Context, path string) (string, error) {
+	out, err := runGitRaw(ctx, path, "diff", "HEAD")
+	if err != nil {
+		out, err = runGitRaw(ctx, path, "diff")
+	}
+	return out, err
+}
+
 // WebURL returns the browsable https URL for a repo's origin remote, or "".
 func WebURL(ctx context.Context, path string) string {
 	raw, err := runGit(ctx, path, "remote", "get-url", "origin")

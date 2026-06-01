@@ -7,6 +7,7 @@ import (
 
 	"github.com/prakashkurup/orchard/internal/claude"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
+	"github.com/prakashkurup/orchard/internal/github"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/search"
@@ -129,10 +130,64 @@ func demoClaude() claude.Usage {
 	return claude.Usage{
 		TotalSessions: 11,
 		TotalTurns:    271,
+		TotalTokens:   18_420_000,
 		ReposUsed:     3,
 		Models:        map[string]int{"opus-4.8": 233, "sonnet-4.6": 38},
 		Repos:         repos,
 		Last:          now.Add(-3 * time.Hour),
+	}
+}
+
+// demoDiff returns a fabricated unified diff for the inline diff viewer.
+func demoDiff() string {
+	return `diff --git a/src/handlers/checkout.ts b/src/handlers/checkout.ts
+index 8a1f2c3..b4d5e6f 100644
+--- a/src/handlers/checkout.ts
++++ b/src/handlers/checkout.ts
+@@ -22,7 +22,9 @@ export async function checkoutHandler(req: Request) {
+   const cart = await loadCart(req.session)
+-  const order = buildSummary(cart)
++  const order = buildCheckoutSummary(cart)
++  order.discount = applyPromo(cart, req.body.promoCode)
+   return render("checkout", { order })
+ }
+diff --git a/src/components/SummaryCard.tsx b/src/components/SummaryCard.tsx
+index 1122334..5566778 100644
+--- a/src/components/SummaryCard.tsx
++++ b/src/components/SummaryCard.tsx
+@@ -10,3 +10,4 @@ export function SummaryCard({ order }: Props) {
+   return (
+-    <div className="card">{order.total}</div>
++    <div className="card summary">{formatPrice(order.total)}</div>
+   )
+ }`
+}
+
+// demoGHStatus returns fabricated GitHub PR/CI status for a few demo repos.
+func demoGHStatus() map[string]github.RepoStatus {
+	return map[string]github.RepoStatus{
+		"/orchard-demo/acme-web": {OpenPRs: 2, CIState: "failing", PRs: []github.PR{
+			{Number: 142, Title: "Redesign the checkout summary card"},
+			{Number: 138, Title: "Add saved cards to checkout"},
+		}},
+		"/orchard-demo/payments-api": {OpenPRs: 1, CIState: "passing", PRs: []github.PR{
+			{Number: 57, Title: "Idempotency keys on the charge endpoint"},
+		}},
+		"/orchard-demo/data-pipeline":  {CIState: "pending"},
+		"/orchard-demo/design-system":  {OpenPRs: 3, CIState: "passing"},
+		"/orchard-demo/billing-worker": {CIState: "failing"},
+	}
+}
+
+// demoSessions returns a fabricated Claude Code session history for the picker.
+func demoSessions() []claude.Session {
+	now := time.Now()
+	return []claude.Session{
+		{ID: "demo-0001-checkout-redesign", Title: "Redesign the checkout summary card", Model: "opus-4.8", Assistant: 42, Tokens: 3_120_000, Modified: now.Add(-3 * time.Hour)},
+		{ID: "demo-0002-idempotency-keys", Title: "Add idempotency keys to the charge endpoint", Model: "opus-4.8", Assistant: 28, Tokens: 1_840_000, Modified: now.Add(-26 * time.Hour)},
+		{ID: "demo-0003-flaky-auth-test", Title: "Investigate the flaky auth test", Model: "sonnet-4.6", Assistant: 15, Tokens: 720_000, Modified: now.Add(-2 * 24 * time.Hour)},
+		{ID: "demo-0004-promo-code", Title: "Wire up the promo code field", Model: "opus-4.8", Assistant: 33, Tokens: 2_050_000, Modified: now.Add(-5 * 24 * time.Hour)},
+		{ID: "demo-0005-price-helper", Title: "Extract a price formatting helper", Model: "sonnet-4.6", Assistant: 9, Tokens: 410_000, Modified: now.Add(-8 * 24 * time.Hour)},
 	}
 }
 

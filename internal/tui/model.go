@@ -13,6 +13,7 @@ import (
 	"github.com/prakashkurup/orchard/internal/claude"
 	"github.com/prakashkurup/orchard/internal/editor"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
+	"github.com/prakashkurup/orchard/internal/github"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/search"
@@ -34,6 +35,8 @@ const (
 	modeWorklog
 	modeClone
 	modeConfirm
+	modeSessions
+	modeDiff
 )
 
 type sortMode int
@@ -143,6 +146,17 @@ type model struct {
 	confirmYes   bool        // confirm modal selection (true = Yes, the default)
 
 	claudeUsage *claude.Usage
+
+	sessionsRepo    repo.Repo // repo whose Claude Code sessions are being browsed
+	sessions        []claude.Session
+	sessionCursor   int
+	sessionsLoading bool
+	sessionsErr     string
+
+	ghStatus map[string]github.RepoStatus // repo path -> open PRs + CI state
+
+	diffRepo repo.Repo // repo whose working-tree diff is shown
+	diffText string    // raw diff text, kept so it can re-colorize on resize
 
 	searchInput   textinput.Model
 	searchVP      viewport.Model
@@ -287,6 +301,7 @@ func Preview(root string, concurrency, width, height int, grouped bool) (string,
 		m.claudeUsage = &u
 		m.langByPath = demoLangs()
 		m.newByPath = demoNew()
+		m.ghStatus = demoGHStatus()
 		m.resize()
 		m.syncRows()
 		return m.View(), nil
@@ -354,6 +369,7 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 	m.mode = modeDetail
 	m.detailRepo = target.Path
 	if demoMode() {
+		m.ghStatus = demoGHStatus()
 		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path)}
 	} else {
 		info, _ := orchardgit.Detail(ctx, target)
@@ -481,7 +497,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncRows()
 		// recompute languages on every manual scan (startup / refresh / after
 		// clone) so newly-added repos get their language; claude usage too.
-		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos)}
+		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos), ghStatusCmd(m.repos)}
 		if !m.seenChecked { // "since last visit" baseline: once per launch only
 			m.seenChecked = true
 			cmds = append(cmds, newCommitsCmd(m.repos))
@@ -615,6 +631,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sessionsMsg:
+		if msg.path == m.sessionsRepo.Path {
+			m.sessionsLoading = false
+			m.sessions = msg.sessions
+			m.sessionCursor = 0
+		}
+		return m, nil
+
+	case ghStatusMsg:
+		m.ghStatus = msg.byPath
+		m.syncRows() // a failing-CI flag may now show in the info column
+		return m, nil
+
+	case diffMsg:
+		if msg.path == m.diffRepo.Path {
+			if msg.err != nil {
+				m.diffText = ""
+				m.detailVP.SetContent(fillLine(errorStyle.Render("  diff: "+msg.err.Error()), m.detailVP.Width, bg))
+			} else {
+				m.diffText = msg.text
+				m.detailVP.SetContent(colorizeDiff(msg.text, m.detailVP.Width))
+			}
+			m.detailVP.GotoTop()
+		}
+		return m, nil
+
 	case checkoutMsg:
 		m.branchBusy = false
 		if msg.err != nil {
@@ -706,6 +748,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleEditorKey(msg)
 		case modeBranch:
 			return m.handleBranchKey(msg)
+		case modeSessions:
+			return m.handleSessionsKey(msg)
+		case modeDiff:
+			return m.handleDiffKey(msg)
 		case modeSearch:
 			return m.handleSearchKey(msg)
 		case modeDetail:
@@ -745,6 +791,9 @@ func (m *model) resize() {
 		// -visible scroll math run against the new searchVP dimensions.
 		m.setSearchContent()
 	}
+	if m.mode == modeDiff {
+		m.detailVP.SetContent(colorizeDiff(m.diffText, m.detailVP.Width))
+	}
 }
 
 func (m model) innerWidth() int {
@@ -763,6 +812,10 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.editorView(inner), inner))
 	case modeBranch:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.branchView(inner), inner))
+	case modeSessions:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.sessionsView(inner), inner))
+	case modeDiff:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
 	case modeHelp:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.helpView(inner))
 	case modeWorklog:

@@ -40,6 +40,19 @@ func TestDemoDataIsFictional(t *testing.T) {
 			t.Errorf("demo search result repo %q is not in the fictional set", res.Repo)
 		}
 	}
+	for _, s := range demoSessions() {
+		if strings.TrimSpace(s.Title) == "" {
+			t.Error("demo session has an empty title")
+		}
+		if !strings.HasPrefix(s.ID, "demo-") {
+			t.Errorf("demo session id %q should be a fictional demo- id", s.ID)
+		}
+	}
+	for _, marker := range []string{"/Users/", "/home/", "Documents/GitHub"} {
+		if strings.Contains(demoDiff(), marker) {
+			t.Errorf("demo diff leaks a real-path marker %q", marker)
+		}
+	}
 }
 
 // renderedDemo joins the demo output of the views a user might screenshot.
