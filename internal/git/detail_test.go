@@ -78,6 +78,8 @@ func TestDetailStripsRemoteCredentials(t *testing.T) {
 	ctx := context.Background()
 	local := t.TempDir()
 	git(t, local, "init")
+	git(t, local, "config", "user.email", "orchard@example.com")
+	git(t, local, "config", "user.name", "Orchard Test")
 	git(t, local, "remote", "add", "origin", "https://user:ghp_TOKEN123@github.com/acme/web.git")
 	writeFile(t, filepath.Join(local, "f.txt"), "x\n")
 	git(t, local, "add", "-A")
