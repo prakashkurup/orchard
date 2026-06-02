@@ -23,6 +23,7 @@ import (
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/tui"
+	"github.com/prakashkurup/orchard/internal/update"
 )
 
 // version is the build version, overridden at release time via
@@ -62,7 +63,7 @@ func run(args []string) error {
 	}
 
 	if len(args) == 0 {
-		return tui.Run(cfg.Root, cfg.Concurrency)
+		return tui.Run(cfg.Root, cfg.Concurrency, version)
 	}
 
 	// A bare launch with flags (e.g. `orchard --root PATH`) has no subcommand;
@@ -76,7 +77,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return tui.Run(root, concurrency)
+		return tui.Run(root, concurrency, version)
 	}
 
 	switch args[0] {
@@ -112,6 +113,8 @@ func run(args []string) error {
 		return runPull(args[1:], cfg)
 	case "stats":
 		return runStats(args[1:], cfg)
+	case "update":
+		return runUpdate()
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -244,6 +247,7 @@ Usage:
   orchard [--config PATH] preview [flags]  render the dashboard once
   orchard [--config PATH] config           show resolved configuration
   orchard [--config PATH] stats            summarize the orchard
+  orchard update                           update orchard to the latest release
   orchard version                          print the version
 
 Common flags:
@@ -257,6 +261,24 @@ Examples:
   orchard scan --root ~/Documents/GitHub
   orchard pull --root ~/Documents/GitHub --all
   orchard clone --root ~/Documents/GitHub --org my-org --match '^service-'`)
+}
+
+func runUpdate() error {
+	current := update.Current(version)
+	fmt.Printf("orchard %s, checking for updates…\n", current)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	tag, err := update.Apply(ctx, current)
+	switch {
+	case errors.Is(err, update.ErrAlreadyLatest):
+		fmt.Println("already on the latest version")
+		return nil
+	case err != nil:
+		return err
+	default:
+		fmt.Printf("updated to %s\n", tag)
+		return nil
+	}
 }
 
 // tuiFlags parses the flags accepted by a bare `orchard` launch (no subcommand):

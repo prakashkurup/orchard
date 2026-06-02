@@ -221,6 +221,9 @@ type model struct {
 	assistantCmd   string // AI assistant launched by `c` ("" = none found)
 	assistantLabel string // short footer label for the assistant
 
+	version   string // running version, for the update check
+	updateTag string // a newer release tag if one is available ("" = up to date)
+
 	loading bool
 	status  string
 	err     string
@@ -313,8 +316,9 @@ type searchResultMsg struct {
 	results []search.Result
 }
 
-func Run(root string, concurrency int) error {
+func Run(root string, concurrency int, version string) error {
 	m := newModel(root, concurrency)
+	m.version = version
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err == nil {
 		fmt.Println(farewell())
@@ -517,7 +521,7 @@ func displayRoot(root string) string {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), idleTickCmd(idleProbe, m.idleGen))
+	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), idleTickCmd(idleProbe, m.idleGen), updateCheckCmd(m.version))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -694,6 +698,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ghStatusMsg:
 		m.ghStatus = msg.byPath
 		m.syncRows() // a failing-CI flag may now show in the info column
+		return m, nil
+
+	case updateMsg:
+		if msg.available {
+			m.updateTag = msg.tag
+		}
 		return m, nil
 
 	case instrMsg:

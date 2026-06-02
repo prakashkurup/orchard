@@ -221,6 +221,9 @@ func (m model) headerView(width int) string {
 			Render(fit(m.spinnerOrSync()+" "+m.status, avail))
 	case m.status != "":
 		statusStyled = statusStyle.Render(fit(m.status, avail))
+	case m.updateTag != "":
+		statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Background(lipgloss.Color(bg)).Bold(true).
+			Render(fit("▲ "+m.updateTag+" available · run: orchard update", avail))
 	}
 	gap := max(1, width-lipgloss.Width(top)-lipgloss.Width(statusStyled))
 	topLine := top + fillLine("", gap, bg) + statusStyled

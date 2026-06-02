@@ -100,6 +100,16 @@ make build       # produces ./orchard (version stamped from git tags)
 make install     # installs into $(go env GOPATH)/bin
 ```
 
+### Updating
+
+orchard checks GitHub for a newer release at most once a day and shows a small notice when one is available (one anonymous request; opt out with `ORCHARD_NO_UPDATE_CHECK=1`).
+
+```sh
+orchard update     # download + checksum-verify + replace the binary in place
+```
+
+`orchard update` is for release-binary installs. If you installed with `go install`, run `go install github.com/prakashkurup/orchard@latest` instead (the command will tell you), and `orchard update` will say so for Homebrew/go-install builds rather than touching a managed binary.
+
 ## Quick start
 
 ```sh
@@ -174,6 +184,7 @@ All settings are optional. **Precedence:** CLI flags → environment variables �
 - `ORCHARD_CONFIG` - explicit config file path.
 - `GITHUB_TOKEN` - token for `orchard clone` (falls back to `gh auth token`).
 - `ORCHARD_ADDDIR_MEMORY` - set to `0` to stop a cross-repo Claude session (`A`) from loading the added repos' `CLAUDE.md` (on by default).
+- `ORCHARD_NO_UPDATE_CHECK` - set to `1` to disable the daily check for a newer release.
 
 **Config file** is a small `key: value` format with one nested `scope:` section. Copy [`config.example.yaml`](config.example.yaml) to `config.yaml`. Search order: `--config` → `$ORCHARD_CONFIG` → `./config.yaml` → next to the binary → `$XDG_CONFIG_HOME/orchard/config.yaml`.
 
@@ -192,6 +203,7 @@ orchard runs locally with no telemetry. Network traffic only happens when you as
 - `git` talking to your remotes (fetch / pull / clone).
 - the **GitHub API** for open-PR and CI status, and for `orchard clone`.
 - **Claude Code**, when you launch it (`c` / `C` / `H` / `A`) or draft a commit message (`M`, which runs `claude -p` and sends the working-tree diff to Claude). The usage panel, CLAUDE column, and stats only **read** your local `~/.claude` transcripts - nothing is sent for those.
+- the **update check** - one anonymous request to the GitHub releases API, at most once a day (disable with `ORCHARD_NO_UPDATE_CHECK=1`).
 
 Privacy details:
 
