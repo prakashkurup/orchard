@@ -1,6 +1,6 @@
 # orchard
 
-A keyboard-driven terminal dashboard for your local git repositories. See every repo's branch, dirty / ahead / behind state, language, and last commit on one screen, then pull, fetch, switch branches, search, or open them in your editor, browser, or Claude Code.
+An agent-aware, multi-repo terminal dashboard. See every local git repo on one screen (branch, dirty / ahead / behind, language, last commit) plus what your AI coding agent did across them: where Claude Code ran, the files it touched, and a flag when there is uncommitted AI work. Then pull, fetch, switch branches, search, diff, or open any repo in your editor, browser, or Claude Code, all from the keyboard.
 
 ![orchard demo](docs/screenshots/demo.gif)
 
