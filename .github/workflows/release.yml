@@ -16,7 +16,7 @@ jobs:
           fetch-depth: 0 # full history + tags for the changelog / version
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: stable # build releases with the latest patched toolchain (security)
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser

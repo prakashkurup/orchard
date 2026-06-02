@@ -165,6 +165,96 @@ func TestDetailLoadingFillsWidth(t *testing.T) {
 	}
 }
 
+func TestClaudeCellStates(t *testing.T) {
+	now := time.Now()
+	strip := func(r repo.Repo) string {
+		return strings.TrimSpace(ansiPattern.ReplaceAllString(claudeCell(r, 12, bg, false), ""))
+	}
+	cases := []struct {
+		name, want string
+		r          repo.Repo
+	}{
+		{"no sessions", "·", repo.Repo{}},
+		{"live + dirty", "!live", repo.Repo{CCSessions: 1, CCLast: now.Add(-10 * time.Second), Dirty: true}},
+		{"live + clean", "live", repo.Repo{CCSessions: 1, CCLast: now.Add(-10 * time.Second)}},
+		{"recent + dirty", "!", repo.Repo{CCSessions: 1, CCLast: now.Add(-2 * time.Hour), Dirty: true}},
+		{"recent + clean", "2h", repo.Repo{CCSessions: 1, CCLast: now.Add(-2 * time.Hour)}},
+		{"old + dirty", "1d", repo.Repo{CCSessions: 1, CCLast: now.Add(-30 * time.Hour), Dirty: true}},
+		{"future stamp", "live", repo.Repo{CCSessions: 1, CCLast: now.Add(10 * time.Second)}}, // clock skew
+	}
+	for _, c := range cases {
+		if got := strip(c.r); !strings.Contains(got, c.want) {
+			t.Errorf("%s: claudeCell = %q, want contains %q", c.name, got, c.want)
+		}
+	}
+	// a live + clean repo must not carry the red bang
+	if got := strip(repo.Repo{CCSessions: 1, CCLast: now.Add(-10 * time.Second)}); strings.Contains(got, "!") {
+		t.Errorf("live+clean should be '● live' with no bang: %q", got)
+	}
+	// past the 24h dirty window the bang is dropped
+	if got := strip(repo.Repo{CCSessions: 1, CCLast: now.Add(-30 * time.Hour), Dirty: true}); strings.Contains(got, "!") {
+		t.Errorf("old dirty repo should not show the bang: %q", got)
+	}
+}
+
+func TestTouchMapUncommittedFlag(t *testing.T) {
+	now := time.Now()
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.instructionsByPath = map[string]instrState{"/repo": {}}
+	m.detail = &detailState{
+		info: orchardgit.DetailInfo{StatusLines: []string{" M src/a.go", " M src/c.go"}},
+		touched: []claude.TouchedFile{
+			{Path: "src/a.go", Writes: 2, Last: now}, // edited + dirty -> flagged
+			{Path: "src/b.go", Writes: 1, Last: now}, // edited, clean   -> not flagged
+			{Path: "src/c.go", Reads: 3, Last: now},  // read-only, dirty -> not flagged
+		},
+	}
+	out := ansiPattern.ReplaceAllString(m.detailBody(120), "")
+	if !strings.Contains(out, "1 uncommitted") {
+		t.Fatalf("summary should report 1 uncommitted (only the edited+dirty file)\n%s", out)
+	}
+	for _, ln := range strings.Split(out, "\n") {
+		touchRow := strings.Contains(ln, "edit ") || strings.Contains(ln, "read ")
+		if !touchRow { // skip the working-tree section, which lists the same files
+			continue
+		}
+		switch {
+		case strings.Contains(ln, "a.go") && !strings.Contains(ln, "uncommitted"):
+			t.Errorf("a.go (edited+dirty) should be flagged: %q", ln)
+		case strings.Contains(ln, "b.go") && strings.Contains(ln, "uncommitted"):
+			t.Errorf("b.go (clean) must not be flagged: %q", ln)
+		case strings.Contains(ln, "c.go") && strings.Contains(ln, "uncommitted"):
+			t.Errorf("c.go (read-only) must not be flagged: %q", ln)
+		}
+	}
+}
+
+func TestDetailHealthNudges(t *testing.T) {
+	now := time.Now()
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.instructionsByPath = map[string]instrState{"/repo": {hasClaude: true, claudeBytes: 41000}}
+	m.detail = &detailState{
+		sessions:     []claude.Session{{Title: "x", Assistant: 1, Tokens: 100, Modified: now.Add(-time.Hour)}},
+		commitsSince: 14,
+	}
+	out := ansiPattern.ReplaceAllString(m.detailBody(120), "")
+	if !strings.Contains(out, "CLAUDE.md is large") {
+		t.Errorf("should warn on a large CLAUDE.md\n%s", out)
+	}
+	if !strings.Contains(out, "commits since it last ran") {
+		t.Errorf("should warn on stale context\n%s", out)
+	}
+	// below the thresholds, neither warning fires
+	m.instructionsByPath = map[string]instrState{"/repo": {hasClaude: true, claudeBytes: 1000}}
+	m.detail.commitsSince = 3
+	out = ansiPattern.ReplaceAllString(m.detailBody(120), "")
+	if strings.Contains(out, "is large") || strings.Contains(out, "may be stale") {
+		t.Errorf("no warnings expected below thresholds\n%s", out)
+	}
+}
+
 func TestDetailClaudeTouchMapReadable(t *testing.T) {
 	m := newModel("root", 4)
 	now := time.Now()

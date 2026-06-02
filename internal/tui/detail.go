@@ -485,6 +485,9 @@ func groupWorktree(lines []string) []wtGroup {
 		case x == 'A':
 			added = append(added, path)
 		case x == 'R' || x == 'C':
+			if i := strings.Index(path, " -> "); i >= 0 {
+				path = path[i+4:] // show the destination, mirroring dirtyPathSet
+			}
 			renamed = append(renamed, path)
 		default:
 			other = append(other, path)

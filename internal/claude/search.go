@@ -105,8 +105,8 @@ func searchFile(path, q string) (SessionHit, bool) {
 	)
 	r := bufio.NewReader(file)
 	for {
-		line, err := r.ReadString('\n')
-		if line != "" {
+		line, over, err := readCappedLine(r)
+		if line != "" && !over {
 			if !matched {
 				if idx := strings.Index(strings.ToLower(line), q); idx >= 0 {
 					matched = true

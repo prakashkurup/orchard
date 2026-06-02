@@ -1,4 +1,4 @@
-# 🌳 orchard
+# orchard
 
 A keyboard-driven terminal dashboard for your local git repositories. See every repo's branch, dirty / ahead / behind state, language, and last commit on one screen, then pull, fetch, switch branches, search, or open them in your editor, browser, or Claude Code.
 
@@ -102,10 +102,16 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 
 - **Usage panel** pinned under the list: total sessions, turns, repos used, last active, a model split, and your busiest repos.
 - **Per-repo CLAUDE column**: how long ago Claude last ran in each repo, colored by recency.
+- **Active now**: a session writing in the last ~60s shows `● live` (green); if that repo is also dirty it shows `!live` (red), so live AI work on an uncommitted tree stands out.
 - **Per-repo footprint in the detail view** (`enter`): that repo's recent sessions, total turns and tokens, and when Claude last ran there.
+- **Files Claude touched** (detail view): the files Claude read or edited here, edited-first, with files it changed but hasn't committed flagged. Press `f` for the full list, then `enter` to open one in your editor or `d` to diff just that file.
 - **Uncommitted-work flag**: when a repo is dirty *and* Claude ran there recently, the CLAUDE cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
 - **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
 - **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
+
+![the repo detail view: languages, the Claude Code section (activity, context, recent sessions, and the files Claude touched), GitHub PRs, the working tree, and the commit graph](docs/screenshots/details.png)
+
+![the Files view (`f`): every file Claude read or edited in a repo, edited first, with uncommitted ones flagged; open one in your editor or diff just that file](docs/screenshots/files.png)
 
 ### Resume and search sessions
 
@@ -117,10 +123,15 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 
 - **Launch** (`c`): open Claude Code in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
 - **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. Each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
+- **Workspace presets** (`W`): save a `space`-selected repo set under a name, then launch the cross-repo `A` session on it in one keystroke, for the groups of services you keep working on together. Stored in `presets.json` (see [Files orchard writes](#files-orchard-writes)).
+
+![workspace presets (`W`): save a selected repo set and launch a cross-repo session on it](docs/screenshots/presets.png)
 
 ### Draft commit messages
 
 - **Draft a commit message** (`M`): Claude Code drafts a message from the working-tree diff *headlessly* (`claude -p`) and shows it in a window you can copy (`y`) or regenerate (`r`), without leaving the dashboard. Other assistants fall back to a terminal session.
+
+![drafting a commit message with Claude (`M`): the message appears in a window to copy or regenerate](docs/screenshots/commit.png)
 
 ### Keep instructions healthy
 
@@ -255,6 +266,16 @@ org: your-github-org
 scope:
   match: "^(service|app)-"
 ```
+
+### Files orchard writes
+
+Beyond the optional `config.yaml`, orchard keeps a little state under your config dir (`$XDG_CONFIG_HOME/orchard`, or `~/Library/Application Support/orchard` on macOS), created lazily the first time it is needed:
+
+- `presets.json` - your workspace presets (`W`).
+- `seen.json` - the last time you visited each repo, for the `n` "new commits since last visit" jump.
+- `editor` - your chosen default editor (`E`).
+
+These are plain, hand-editable files that orchard owns. Reads are **fail-soft**: if one is missing or corrupt, orchard falls back to a safe default (no presets, no last-visit, the editor picker) instead of erroring, and the next save rewrites it. The daily update check also caches its last result under your home cache dir. A malformed `config.yaml`, by contrast, is reported at startup, since that is configuration you declared on purpose.
 
 ## Security & privacy
 

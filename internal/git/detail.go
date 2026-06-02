@@ -44,11 +44,13 @@ type DetailInfo struct {
 func Detail(ctx context.Context, r repo.Repo) (DetailInfo, error) {
 	info := DetailInfo{Branch: r.Branch, Upstream: r.Upstream}
 
-	if status, err := runGitRaw(ctx, r.Path, "status", "--porcelain"); err == nil {
-		for _, line := range strings.Split(status, "\n") {
-			if strings.TrimSpace(line) != "" {
-				info.StatusLines = append(info.StatusLines, line)
-			}
+	status, err := runGitRaw(ctx, r.Path, "status", "--porcelain")
+	if err != nil {
+		return info, err // a broken or removed repo surfaces as an error, not a blank page
+	}
+	for _, line := range strings.Split(status, "\n") {
+		if strings.TrimSpace(line) != "" {
+			info.StatusLines = append(info.StatusLines, line)
 		}
 	}
 

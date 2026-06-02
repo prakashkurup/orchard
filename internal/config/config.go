@@ -122,6 +122,9 @@ func applyFile(cfg *Config, path string) error {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		if leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]; strings.Contains(leading, "\t") {
+			return fmt.Errorf("%s:%d: tabs are not allowed for indentation; use spaces", path, lineNo)
+		}
 
 		indent := len(line) - len(strings.TrimLeft(line, " "))
 		trimmed := strings.TrimSpace(line)
@@ -139,6 +142,9 @@ func applyFile(cfg *Config, path string) error {
 		}
 		if indent == 0 {
 			section = ""
+		}
+		if indent > 0 && section == "" {
+			return fmt.Errorf("%s:%d: unexpected indentation (no section to nest under)", path, lineNo)
 		}
 
 		switch {

@@ -111,8 +111,8 @@ func scanTouches(path string, mod time.Time, repoPath, prefix string, agg map[st
 
 	r := bufio.NewReader(file)
 	for {
-		line, err := r.ReadString('\n')
-		if strings.Contains(line, `"tool_use"`) {
+		line, over, err := readCappedLine(r)
+		if !over && strings.Contains(line, `"tool_use"`) {
 			var tl touchLine
 			if json.Unmarshal([]byte(line), &tl) == nil {
 				for _, c := range tl.Message.Content {

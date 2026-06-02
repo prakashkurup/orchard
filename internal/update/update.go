@@ -123,12 +123,16 @@ func Apply(ctx context.Context, current string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if sumURL != "" {
-		if sums, err := download(ctx, sumURL); err == nil {
-			if err := verify(tgz, baseName(tarURL), string(sums)); err != nil {
-				return "", err
-			}
-		}
+	// Verification is mandatory: never install a binary we could not check.
+	if sumURL == "" {
+		return "", fmt.Errorf("release has no checksums.txt; refusing to install an unverified binary")
+	}
+	sums, err := download(ctx, sumURL)
+	if err != nil {
+		return "", fmt.Errorf("download checksums: %w", err)
+	}
+	if err := verify(tgz, baseName(tarURL), string(sums)); err != nil {
+		return "", err
 	}
 	bin, err := extractBinary(tgz)
 	if err != nil {
@@ -215,7 +219,8 @@ func download(ctx context.Context, url string) ([]byte, error) {
 }
 
 // verify checks the archive's sha256 against the matching line in checksums.txt.
-// A missing entry is not fatal (skips), a present-but-mismatched one is.
+// It fails closed: a missing entry or a mismatch is an error, so an unverified
+// binary is never installed.
 func verify(data []byte, name, checksums string) error {
 	want := ""
 	for _, ln := range strings.Split(checksums, "\n") {
@@ -224,7 +229,7 @@ func verify(data []byte, name, checksums string) error {
 		}
 	}
 	if want == "" {
-		return nil
+		return fmt.Errorf("no checksum listed for %s", name)
 	}
 	sum := sha256.Sum256(data)
 	if hex.EncodeToString(sum[:]) != want {

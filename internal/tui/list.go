@@ -594,8 +594,8 @@ func claudeCell(r repo.Repo, width int, bgColor string, current bool) string {
 		return cellStyle(muted, bgColor, false).Render(padRight("·", width))
 	}
 	recent := time.Since(r.CCLast)
-	live := recent >= 0 && recent < claudeActiveWindow
-	dirtyHot := r.Dirty && recent < 24*time.Hour // uncommitted AI work, the stronger signal
+	live := recent < claudeActiveWindow && recent > -claudeActiveWindow // small clock skew still counts as live
+	dirtyHot := r.Dirty && recent < 24*time.Hour                        // uncommitted AI work, the stronger signal
 	switch {
 	case dirtyHot && live:
 		return cellStyle(red, bgColor, true).Render(padRight("!live", width))

@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: stable # latest patched toolchain (go.mod's `go` line stays the language minimum)
           cache: true
       - name: Lint (gofmt + vet)
         run: make lint

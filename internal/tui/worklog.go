@@ -45,7 +45,7 @@ func worklogCmd(repos []repo.Repo, window string) tea.Cmd {
 			total += len(g.commits)
 			sb.WriteString(g.repo + "\n")
 			for _, c := range g.commits {
-				sb.WriteString("  • " + c.Subject + "\n")
+				sb.WriteString("  • " + cleanText(c.Subject) + "\n")
 			}
 			sb.WriteString("\n")
 		}

@@ -179,6 +179,38 @@ func Sessions(repoPath string, limit int) []Session {
 	return out
 }
 
+// maxTranscriptLine caps how much of one JSONL line is buffered. Transcript lines
+// embed tool output and base64 images and can be enormous; the fields read here
+// are all small, so a line past the cap is drained and skipped rather than
+// allocated whole (a guard against a crafted or oversized transcript).
+const maxTranscriptLine = 4 << 20 // 4 MiB
+
+// readCappedLine reads the next line via ReadSlice (whose buffer never grows) and
+// accumulates at most maxTranscriptLine bytes. It returns the (possibly capped)
+// line, over=true when the real line exceeded the cap, and the read error (nil on
+// a normal line, io.EOF on the final line, or a real I/O error).
+func readCappedLine(r *bufio.Reader) (string, bool, error) {
+	var b []byte
+	over := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if len(b) < maxTranscriptLine {
+			if room := maxTranscriptLine - len(b); len(chunk) > room {
+				b = append(b, chunk[:room]...)
+				over = true
+			} else {
+				b = append(b, chunk...)
+			}
+		} else if len(chunk) > 0 {
+			over = true
+		}
+		if err == bufio.ErrBufferFull {
+			continue // line longer than bufio's buffer; keep draining
+		}
+		return string(b), over, err
+	}
+}
+
 func parseSession(path string, s *Session) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -189,8 +221,8 @@ func parseSession(path string, s *Session) {
 	var lastPrompt string
 	r := bufio.NewReader(file)
 	for {
-		line, err := r.ReadString('\n') // handles arbitrarily long lines (base64 images, etc.)
-		if line != "" {
+		line, over, err := readCappedLine(r)
+		if line != "" && !over {
 			if strings.Contains(line, `"type":"assistant"`) {
 				s.Assistant++
 			}

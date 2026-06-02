@@ -49,9 +49,9 @@ func TestVerify(t *testing.T) {
 	if err := verify(data, "orchard_0.3.0_darwin_arm64.tar.gz", bad); err == nil {
 		t.Error("mismatched checksum should fail")
 	}
-	// name absent from checksums -> skipped, not an error
-	if err := verify(data, "orchard_0.3.0_linux_amd64.tar.gz", good); err != nil {
-		t.Errorf("absent name should skip, got %v", err)
+	// name absent from checksums -> fail closed (never install an unverified binary)
+	if err := verify(data, "orchard_0.3.0_linux_amd64.tar.gz", good); err == nil {
+		t.Error("absent name should fail closed, not skip")
 	}
 }
 
