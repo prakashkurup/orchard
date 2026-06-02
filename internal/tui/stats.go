@@ -196,6 +196,9 @@ func (m model) statsBody(width int) string {
 		rows = append(rows, line(""), line(segB(claudeC, "  Claude Code")+
 			seg(muted, fmt.Sprintf("    %d sessions · %d turns · %s tokens", u.TotalSessions, u.TotalTurns, humanTokens(u.TotalTokens)))))
 	}
+	if days, set := claude.CleanupPeriodDays(); set && days == 0 {
+		rows = append(rows, line(seg(orange, "  ⚠ Claude cleanupPeriodDays=0")+seg(muted, " · sessions auto-delete; raise it to keep your history")))
+	}
 
 	// heatmaps
 	if m.statsLoading {

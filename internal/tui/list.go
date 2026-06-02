@@ -47,6 +47,10 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		m.selected = map[string]bool{}
 		m.status = "selection cleared"
+	case "y":
+		if r, ok := m.currentRepo(); ok {
+			m.status = copyToClipboard(r.Path, "path")
+		}
 	case "r":
 		m.loading = true
 		m.err = ""
@@ -150,6 +154,8 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.requestWire(m.selectionTargets())
 	case "R":
 		return m.openSessionSearch()
+	case "W":
+		return m.openPresets()
 	case "b":
 		if r, ok := m.currentRepo(); ok {
 			return m.openBranchSwitcher(r)
@@ -579,15 +585,27 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 // like SYNCED. A dim dot means no sessions. When the repo is dirty and Claude ran
 // recently, it turns red with a leading "!" to flag Claude-edited work that has
 // not been committed yet, so AI changes are not lost in an unstaged tree.
+// claudeActiveWindow: how recently a transcript must have been written for the
+// CLAUDE cell to read "live" (a session writing right now).
+const claudeActiveWindow = 60 * time.Second
+
 func claudeCell(r repo.Repo, width int, bgColor string, current bool) string {
 	if r.CCSessions == 0 || r.CCLast.IsZero() {
 		return cellStyle(muted, bgColor, false).Render(padRight("·", width))
 	}
-	text, col := relTime(r.CCLast), freshnessColor(r.CCLast)
-	if r.Dirty && time.Since(r.CCLast) < 24*time.Hour {
-		text, col = "!"+text, red
+	recent := time.Since(r.CCLast)
+	live := recent >= 0 && recent < claudeActiveWindow
+	dirtyHot := r.Dirty && recent < 24*time.Hour // uncommitted AI work, the stronger signal
+	switch {
+	case dirtyHot && live:
+		return cellStyle(red, bgColor, true).Render(padRight("!live", width))
+	case live:
+		return cellStyle(green, bgColor, true).Render(padRight("● live", width))
+	case dirtyHot:
+		return cellStyle(red, bgColor, current).Render(padRight("!"+relTime(r.CCLast), width))
+	default:
+		return cellStyle(freshnessColor(r.CCLast), bgColor, current).Render(padRight(relTime(r.CCLast), width))
 	}
-	return cellStyle(col, bgColor, current).Render(padRight(text, width))
 }
 
 // sparkline renders weekly commit counts as a compact bar chart sized to width.

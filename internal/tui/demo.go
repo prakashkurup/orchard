@@ -89,17 +89,20 @@ func demoRepos() []repo.Repo {
 		// Per-repo Claude Code footprint (sessions, hours since last session). Mirrors
 		// demoClaude(). acme-web is dirty + recent, so it shows the uncommitted flag.
 		if cc, ok := map[string][2]int{
-			"acme-web": {6, 3}, "payments-api": {3, 26}, "data-pipeline": {2, 96}, "cli-tools": {1, 2},
+			"acme-web": {6, 3}, "payments-api": {3, 26}, "data-pipeline": {2, 96}, "cli-tools": {1, 0},
 		}[s.name]; ok {
 			r.CCSessions = cc[0]
-			r.CCLast = time.Now().Add(-time.Duration(cc[1]) * time.Hour)
+			if cc[1] == 0 {
+				r.CCLast = time.Now().Add(-30 * time.Second) // a session active right now
+			} else {
+				r.CCLast = time.Now().Add(-time.Duration(cc[1]) * time.Hour)
+			}
 		}
 		repos = append(repos, r.WithDisplay())
 	}
 	return repos
 }
 
-// demoLangs maps each demo repo path to its (authentic) language Stat.
 func demoAgo(d time.Duration) time.Time { return time.Now().Add(-d) }
 
 func demoSessionHits(query string) []claude.SessionHit {
@@ -124,12 +127,12 @@ func demoSessionHits(query string) []claude.SessionHit {
 
 func demoInstr() map[string]instrState {
 	return map[string]instrState{
-		"/orchard-demo/acme-web":       {hasClaude: true, hasAgents: true, imports: true}, // wired
-		"/orchard-demo/payments-api":   {hasClaude: true},                                 // claude only
-		"/orchard-demo/auth-service":   {hasAgents: true},                                 // needs wiring
-		"/orchard-demo/gateway":        {hasClaude: true, hasAgents: true},                // has both, not imported
-		"/orchard-demo/billing-worker": {hasAgents: true},                                 // needs wiring
-		"/orchard-demo/cli-tools":      {},                                                // no instructions at all
+		"/orchard-demo/acme-web":       {hasClaude: true, hasAgents: true, imports: true, claudeBytes: 41000}, // wired, large
+		"/orchard-demo/payments-api":   {hasClaude: true},                                                     // claude only
+		"/orchard-demo/auth-service":   {hasAgents: true},                                                     // needs wiring
+		"/orchard-demo/gateway":        {hasClaude: true, hasAgents: true},                                    // has both, not imported
+		"/orchard-demo/billing-worker": {hasAgents: true},                                                     // needs wiring
+		"/orchard-demo/cli-tools":      {},                                                                    // no instructions at all
 	}
 }
 
@@ -247,6 +250,21 @@ func demoSessions() []claude.Session {
 		{ID: "demo-0003-flaky-auth-test", Title: "Investigate the flaky auth test", Model: "sonnet-4.6", Assistant: 15, Tokens: 720_000, Modified: now.Add(-2 * 24 * time.Hour)},
 		{ID: "demo-0004-promo-code", Title: "Wire up the promo code field", Model: "opus-4.8", Assistant: 33, Tokens: 2_050_000, Modified: now.Add(-5 * 24 * time.Hour)},
 		{ID: "demo-0005-price-helper", Title: "Extract a price formatting helper", Model: "sonnet-4.6", Assistant: 9, Tokens: 410_000, Modified: now.Add(-8 * 24 * time.Hour)},
+	}
+}
+
+// demoTouched returns a fabricated touch map. The first three paths match the
+// dirty StatusLines in demoDetail so the "uncommitted" flag is visible.
+func demoTouched() []claude.TouchedFile {
+	now := time.Now()
+	return []claude.TouchedFile{
+		{Path: "src/components/SummaryCard.tsx", Writes: 5, Reads: 2, Last: now.Add(-3 * time.Hour)},
+		{Path: "src/handlers/checkout.ts", Writes: 3, Reads: 1, Last: now.Add(-3 * time.Hour)},
+		{Path: "src/components/SummaryCard.test.tsx", Writes: 2, Last: now.Add(-3 * time.Hour)},
+		{Path: "src/lib/price.ts", Writes: 1, Reads: 1, Last: now.Add(-26 * time.Hour)},
+		{Path: "src/types/cart.ts", Reads: 6, Last: now.Add(-3 * time.Hour)},
+		{Path: "src/api/client.ts", Reads: 3, Last: now.Add(-26 * time.Hour)},
+		{Path: "src/components/EmptyCart.tsx", Reads: 2, Last: now.Add(-2 * 24 * time.Hour)},
 	}
 }
 

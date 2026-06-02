@@ -71,6 +71,8 @@ func (m model) helpBody(width int) string {
 		{"SELECT", [][2]string{
 			{"space / a", "select current / all visible"},
 			{"x", "clear all selections"},
+			{"y", "copy the repo path to the clipboard"},
+			{"mouse", "click a row to select · wheel to scroll"},
 		}},
 		{"GIT", [][2]string{
 			{"p / P", "pull selected / all (ff-only)"},
@@ -81,10 +83,12 @@ func (m model) helpBody(width int) string {
 		{"CLAUDE CODE", [][2]string{
 			{"c / C", "launch / resume last session"},
 			{"H", "browse and resume past sessions"},
+			{"f", "files Claude touched (detail page; open / diff them)"},
 			{"A", "one session across selected repos (2+)"},
 			{"M", "draft a commit message in a window"},
 			{"I", "wire AGENTS.md into a new CLAUDE.md (selected)"},
 			{"R", "search all past sessions, then resume one"},
+			{"W", "workspace presets: save a repo set, launch a session on it"},
 		}},
 		{"INSPECT", [][2]string{
 			{"enter", "repo detail (status, graph, remotes)"},

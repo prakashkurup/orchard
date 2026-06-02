@@ -58,6 +58,27 @@ func ProjectsRoot() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
+// CleanupPeriodDays reads Claude Code's settings.json and returns the transcript
+// retention setting. set is false when the file or key is absent. A value of 0
+// historically meant "delete immediately" (a footgun worth warning about).
+func CleanupPeriodDays() (days int, set bool) {
+	root := ProjectsRoot()
+	if root == "" {
+		return 0, false
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(root), "settings.json"))
+	if err != nil {
+		return 0, false
+	}
+	var s struct {
+		CleanupPeriodDays *int `json:"cleanupPeriodDays"`
+	}
+	if json.Unmarshal(data, &s) != nil || s.CleanupPeriodDays == nil {
+		return 0, false
+	}
+	return *s.CleanupPeriodDays, true
+}
+
 // DirFor returns the transcript directory for a repo path.
 func DirFor(repoPath string) string {
 	root := ProjectsRoot()

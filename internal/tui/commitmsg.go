@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os/exec"
 	"strings"
@@ -17,7 +18,9 @@ import (
 // commitMsgPromptHeadless asks for a clean, paste-ready message with no extras,
 // since the output is shown verbatim in a window (not a chat).
 const commitMsgPromptHeadless = "Write a single git commit message for the diff below. " +
-	"Conventional-commit style, imperative mood, a short subject and an optional brief body only if it adds value. " +
+	"Use conventional-commit style and imperative mood. First line: a focused subject under 72 characters; use a scope only when obvious from the diff. " +
+	"If a body adds value, add one blank line and then 2-4 concise bullet points starting with '- '; no paragraph body. " +
+	"Do not mention details that are not evident in the diff. " +
 	"Output ONLY the commit message text: no code fences, no quotes, no preamble."
 
 type commitMsgMsg struct {
@@ -70,15 +73,27 @@ func commitMsgCmd(assistantCmd string, r repo.Repo) tea.Cmd {
 			diff = diff[:12000] + "\n…(diff truncated)…"
 		}
 		fields := strings.Fields(assistantCmd)
-		args := append(append([]string{}, fields[1:]...), "-p", commitMsgPromptHeadless+"\n\n"+diff)
+		args := append(append([]string{}, fields[1:]...), "-p", commitMsgPromptHeadless+"\n\n"+diff, "--output-format", "json")
 		cmd := exec.CommandContext(ctx, fields[0], args...)
 		cmd.Dir = r.Path
 		out, err := cmd.Output()
 		if err != nil {
 			return commitMsgMsg{path: r.Path, err: err}
 		}
-		return commitMsgMsg{path: r.Path, text: cleanCommitMsg(string(out))}
+		return commitMsgMsg{path: r.Path, text: parseAssistantOutput(string(out))}
 	}
+}
+
+// parseAssistantOutput reads the message from `claude -p --output-format json`
+// ({"result": "..."}), falling back to cleaning the raw text if it is not JSON.
+func parseAssistantOutput(out string) string {
+	var r struct {
+		Result string `json:"result"`
+	}
+	if json.Unmarshal([]byte(out), &r) == nil && strings.TrimSpace(r.Result) != "" {
+		return cleanCommitMsg(r.Result)
+	}
+	return cleanCommitMsg(out)
 }
 
 // wrapText soft-wraps plain text to width columns, breaking on spaces and
@@ -181,12 +196,16 @@ func (m model) commitMsgView(width int) string {
 		add("")
 		switch {
 		case m.commitMsgLoading:
-			add(fg(muted).Render("  ") + draftBuddy(m.commitMsgFrame) + fg(muted).Render("  drafting with "+m.assistantLabel+"…"))
+			add(fg(muted).Render("  ") + draftBuddy(m.commitMsgFrame) + fg(muted).Render("  drafting with Claude"))
 		case m.commitMsgErr != "":
 			add(fg(red).Render("  " + fit(m.commitMsgErr, inner-4)))
 		default:
-			for _, ln := range wrapText(m.commitMsg, inner-4) {
-				add(fg(ice).Render("  " + ln))
+			for i, ln := range wrapText(m.commitMsg, inner-4) {
+				st := fg(ice)
+				if i == 0 {
+					st = fg(ice).Bold(true) // the subject line leads, like a real commit
+				}
+				add(st.Render("  " + ln))
 			}
 		}
 		add("")

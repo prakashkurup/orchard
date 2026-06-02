@@ -135,6 +135,60 @@ func repoMatches(r repo.Repo, q string) bool {
 	}
 }
 
+// scrollActive scrolls whatever view is in front by delta rows (negative = up),
+// so the mouse wheel works everywhere, not just the dashboard.
+func (m *model) scrollActive(delta int) {
+	switch m.mode {
+	case modeList:
+		m.moveCursor(delta)
+		m.syncRows()
+	case modeDetail, modeDiff, modeStats, modeHelp, modeWorklog:
+		if delta < 0 {
+			m.detailVP.ScrollUp(-delta)
+		} else {
+			m.detailVP.ScrollDown(delta)
+		}
+	case modeSearch:
+		if len(m.searchFlat) > 0 {
+			m.searchCursor = clamp(m.searchCursor+delta, 0, len(m.searchFlat)-1)
+			m.setSearchContent()
+		}
+	case modeSessions:
+		m.sessionCursor = clamp(m.sessionCursor+delta, 0, max(0, len(m.sessions)-1))
+	case modeSessionSearch:
+		m.sessionSearchCursor = clamp(m.sessionSearchCursor+delta, 0, max(0, len(m.sessionSearchResults)-1))
+	case modePresets:
+		if !m.presetNaming {
+			m.presetCursor = clamp(m.presetCursor+delta, 0, max(0, len(sortedPresetNames(m.presets))-1))
+		}
+	case modeTouched:
+		m.touchedCursor = clamp(m.touchedCursor+delta, 0, max(0, len(m.touchedFiles)-1))
+	}
+}
+
+// rowAtY maps a mouse Y to a repo row index in m.view, or -1 for a header or
+// out-of-range click. Mouse coordinates include appStyle's top padding, then
+// header (3), metrics (1), and grid header (1), so repo content starts at line 6.
+func (m *model) rowAtY(y int) int {
+	const firstRepoRowY = 6
+	idx := m.viewport.YOffset + (y - firstRepoRowY)
+	if idx < 0 || idx >= len(m.view) || m.view[idx].header {
+		return -1
+	}
+	return idx
+}
+
+// clickToRow focuses the repo row under a mouse click and toggles its selection.
+func (m *model) clickToRow(y int) {
+	idx := m.rowAtY(y)
+	if idx < 0 {
+		return
+	}
+	m.cursor = idx
+	m.ensureCursorVisible()
+	m.toggleCurrent() // a click selects/deselects the repo
+}
+
 func (m *model) normalizeCursor() {
 	if len(m.view) == 0 {
 		m.cursor = 0

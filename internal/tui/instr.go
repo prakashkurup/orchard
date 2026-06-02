@@ -13,10 +13,14 @@ import (
 // exist, and whether CLAUDE.md imports AGENTS.md (Claude Code does not read
 // AGENTS.md natively).
 type instrState struct {
-	hasClaude bool
-	hasAgents bool
-	imports   bool
+	hasClaude   bool
+	hasAgents   bool
+	imports     bool
+	claudeBytes int // size of CLAUDE.md, to warn when it is large
 }
+
+// claudeMDLargeBytes: above this, CLAUDE.md eats a lot of context every session.
+const claudeMDLargeBytes = 25_000
 
 // needsWiring: has AGENTS.md but Claude Code will not read it.
 func (s instrState) needsWiring() bool {
@@ -39,6 +43,7 @@ func detectInstr(path string) instrState {
 	if data, err := os.ReadFile(filepath.Join(path, "CLAUDE.md")); err == nil {
 		s.hasClaude = true
 		s.imports = strings.Contains(string(data), "@AGENTS.md")
+		s.claudeBytes = len(data)
 	}
 	if _, err := os.Stat(filepath.Join(path, "AGENTS.md")); err == nil {
 		s.hasAgents = true

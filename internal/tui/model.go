@@ -40,6 +40,8 @@ const (
 	modeStats
 	modeCommitMsg
 	modeSessionSearch
+	modePresets
+	modeTouched
 )
 
 type sortMode int
@@ -169,6 +171,14 @@ type model struct {
 
 	diffRepo repo.Repo // repo whose working-tree diff is shown
 	diffText string    // raw diff text, kept so it can re-colorize on resize
+	diffPath string    // single file the diff is scoped to ("" = whole working tree)
+
+	touchedRepo    repo.Repo            // repo whose touched-files list is shown
+	touchedFiles   []claude.TouchedFile // files Claude read/edited there
+	touchedDirty   map[string]bool      // repo-relative paths with uncommitted changes
+	touchedCursor  int
+	touchedLoading bool
+	touchedReturn  uiMode // where esc returns (own field, since opening a diff reuses returnMode)
 
 	returnMode uiMode // where a modal returns to on close (list, or detail if opened there)
 
@@ -224,6 +234,11 @@ type model struct {
 	version   string // running version, for the update check
 	updateTag string // a newer release tag if one is available ("" = up to date)
 
+	presets      map[string][]string // named repo sets, for one-key cross-repo launches
+	presetCursor int
+	presetNaming bool // true = typing a name for a new preset
+	presetInput  textinput.Model
+
 	loading bool
 	status  string
 	err     string
@@ -248,11 +263,13 @@ type statusMsg struct {
 }
 
 type detailMsg struct {
-	path     string
-	info     orchardgit.DetailInfo
-	langs    []lang.Stat
-	sessions []claude.Session
-	err      error
+	path         string
+	info         orchardgit.DetailInfo
+	langs        []lang.Stat
+	sessions     []claude.Session
+	commitsSince int
+	touched      []claude.TouchedFile
+	err          error
 }
 
 type claudeStatsMsg struct {
@@ -319,7 +336,11 @@ type searchResultMsg struct {
 func Run(root string, concurrency int, version string) error {
 	m := newModel(root, concurrency)
 	m.version = version
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if os.Getenv("ORCHARD_NO_MOUSE") == "" {
+		opts = append(opts, tea.WithMouseCellMotion()) // click to focus a row, wheel to scroll
+	}
+	_, err := tea.NewProgram(m, opts...).Run()
 	if err == nil {
 		fmt.Println(farewell())
 	}
@@ -410,11 +431,12 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 	if demoMode() {
 		m.ghStatus = demoGHStatus()
 		m.instructionsByPath = demoInstr()
-		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path), sessions: demoSessions()}
+		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path), sessions: demoSessions(), commitsSince: 14, touched: demoTouched()}
 	} else {
 		info, _ := orchardgit.Detail(ctx, target)
 		m.instructionsByPath = map[string]instrState{target.Path: detectInstr(target.Path)}
-		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path), sessions: claude.Sessions(target.Path, 10)}
+		sessions := claude.Sessions(target.Path, 10)
+		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, target.Path, sessions), touched: claude.TouchMap(target.Path, touchMapSessions)}
 	}
 	m.setDetailContent()
 	return m.View(), nil
@@ -461,6 +483,11 @@ func newModel(root string, concurrency int) model {
 	qi.Placeholder = "search across all Claude sessions…"
 	qi.CharLimit = 200
 
+	pi := textinput.New()
+	pi.Prompt = ""
+	pi.Placeholder = "preset name…"
+	pi.CharLimit = 60
+
 	// Inputs must paint their own background or the placeholder (256-color grey
 	// with no bg) falls through to the terminal default and shows as a grey box.
 	// Modal inputs sit on the panel; the dashboard filter and search on the app bg.
@@ -470,6 +497,8 @@ func newModel(root string, concurrency int) model {
 	bi.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
 	ci.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
 	ci.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
+	pi.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
+	pi.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
 	ti.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
 	ti.TextStyle = onBg.Foreground(lipgloss.Color(ice))
 	si.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
@@ -491,6 +520,8 @@ func newModel(root string, concurrency int) model {
 		branchInput:        bi,
 		cloneInput:         ci,
 		sessionSearchInput: qi,
+		presetInput:        pi,
+		presets:            map[string][]string{},
 		selected:           map[string]bool{},
 		pulling:            map[string]bool{},
 		newByPath:          map[string]int{},
@@ -706,6 +737,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.ssActive {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.scrollActive(-1)
+		case tea.MouseButtonWheelDown:
+			m.scrollActive(1)
+		case tea.MouseButtonLeft:
+			if m.mode == modeList && msg.Action == tea.MouseActionPress {
+				m.clickToRow(msg.Y) // click selects/deselects the row (enter opens detail)
+				m.syncRows()
+			}
+		}
+		return m, nil
+
 	case instrMsg:
 		m.instructionsByPath = msg.byPath
 		if m.mode == modeDetail {
@@ -754,6 +802,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case touchedMsg:
+		if msg.path == m.touchedRepo.Path {
+			m.touchedFiles = msg.files
+			m.touchedDirty = msg.dirty
+			m.touchedLoading = false
+			m.touchedCursor = clamp(m.touchedCursor, 0, max(0, len(m.touchedFiles)-1))
+		}
+		return m, nil
 	case diffMsg:
 		if msg.path == m.diffRepo.Path {
 			if msg.err != nil {
@@ -816,7 +872,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detailMsg:
 		if msg.path == m.detailRepo {
-			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions}
+			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions, commitsSince: msg.commitsSince, touched: msg.touched}
 			if msg.err != nil {
 				st.err = msg.err.Error()
 			} else {
@@ -824,17 +880,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.detail = st
 			m.setDetailContent()
+			if strings.HasPrefix(m.status, "loading ") {
+				m.status = ""
+			}
 		}
 		return m, nil
 
 	case spinner.TickMsg:
-		if len(m.pulling) > 0 {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		switch {
+		case len(m.pulling) > 0:
 			m.syncRows()
 			return m, cmd
+		case m.mode == modeDetail && m.detail == nil:
+			m.setDetailContent() // re-render the animated loading line in the viewport
+			return m, cmd
+		case m.mode == modeTouched && m.touchedLoading:
+			return m, cmd // touchedView reads m.spinner.View() on each render
 		}
-		return m, nil
+		return m, nil // nothing loading: let the tick chain stop
 
 	case tea.KeyMsg:
 		// Any key wakes the screensaver (and is consumed doing so) and resets idle.
@@ -868,6 +933,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleCommitMsgKey(msg)
 		case modeSessionSearch:
 			return m.handleSessionSearchKey(msg)
+		case modePresets:
+			return m.handlePresetsKey(msg)
+		case modeTouched:
+			return m.handleTouchedKey(msg)
 		case modeSearch:
 			return m.handleSearchKey(msg)
 		case modeDetail:
@@ -937,6 +1006,10 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.commitMsgView(inner), inner))
 	case modeSessionSearch:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.sessionSearchView(inner))
+	case modePresets:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.presetsView(inner), inner))
+	case modeTouched:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.touchedView(inner), inner))
 	case modeDiff:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
 	case modeStats:

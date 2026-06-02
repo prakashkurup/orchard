@@ -180,8 +180,10 @@ func (m model) openClaudeCombined(targets []repo.Repo) (tea.Model, tea.Cmd) {
 // commitMsgPrompt is the prompt used when drafting a commit message in a terminal
 // session (the fallback for non-Claude assistants; see commitMsgPromptHeadless).
 const commitMsgPrompt = "Write a concise git commit message for the staged changes " +
-	"(or the whole working tree if nothing is staged). Conventional style, imperative mood, " +
-	"no body unless it adds value. Show the message in a code block; do not commit anything."
+	"(or the whole working tree if nothing is staged). Use conventional-commit style and imperative mood. " +
+	"First line: a focused subject under 72 characters; use a scope only when obvious. " +
+	"If a body adds value, add one blank line and then 2-4 concise bullet points starting with '- '; no paragraph body. " +
+	"Do not mention details that are not evident in the diff. Show only the message in a code block; do not commit anything."
 
 func claudeStatsCmd(repos []repo.Repo) tea.Cmd {
 	if demoMode() {
@@ -206,7 +208,7 @@ func (m model) claudePanel(width int) string {
 
 	one := func(content string) string {
 		return lipgloss.JoinVertical(lipgloss.Left, rule,
-			fillLine(marker+title+content, width, bg),
+			fillLine(fitStyled(marker+title+content, width), width, bg),
 			fillLine(marker, width, bg))
 	}
 	if m.claudeUsage == nil {
@@ -272,7 +274,7 @@ func (m model) claudePanel(width int) string {
 		if i >= topRepos {
 			break
 		}
-		busiest += seg(ice, r.Name+" ") + miniBar(r.Turns, u.Repos[0].Turns, 6, green) + seg(muted, fmt.Sprintf(" %d   ", r.Turns))
+		busiest += seg(ice, fit(r.Name, 18)+" ") + miniBar(r.Turns, u.Repos[0].Turns, 6, green) + seg(muted, fmt.Sprintf(" %d   ", r.Turns))
 	}
 	if len(u.Repos) > topRepos {
 		busiest += seg(muted, fmt.Sprintf("+%d more", len(u.Repos)-topRepos))
@@ -280,8 +282,8 @@ func (m model) claudePanel(width int) string {
 	l2 := marker + segB(ice, "MODELS ") + models + seg(muted, " │  ") + segB(ice, "BUSIEST ") + busiest
 
 	return lipgloss.JoinVertical(lipgloss.Left, rule,
-		fillLine(l1, width, bg),
-		fillLine(l2, width, bg))
+		fillLine(fitStyled(l1, width), width, bg),
+		fillLine(fitStyled(l2, width), width, bg))
 }
 
 // showClaudePanel reports whether the pinned usage panel has real data to show.

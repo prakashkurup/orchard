@@ -3,6 +3,8 @@ package git
 import (
 	"context"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/prakashkurup/orchard/internal/repo"
@@ -165,12 +167,53 @@ func AuthoredDays(ctx context.Context, path, since string) []string {
 // Diff returns the working-tree diff against HEAD (staged + unstaged) for the
 // inline diff viewer; an empty string means a clean tree. Falls back to a plain
 // diff when the repo has no commits yet (no HEAD).
-func Diff(ctx context.Context, path string) (string, error) {
-	out, err := runGitRaw(ctx, path, "diff", "HEAD")
+func Diff(ctx context.Context, path string, pathspec ...string) (string, error) {
+	build := func(base ...string) []string {
+		if len(pathspec) == 0 {
+			return base
+		}
+		return append(append(base, "--"), pathspec...)
+	}
+	out, err := runGitRaw(ctx, path, build("diff", "HEAD")...)
 	if err != nil {
-		out, err = runGitRaw(ctx, path, "diff")
+		out, err = runGitRaw(ctx, path, build("diff")...)
+	}
+	// An untracked file (a new file the agent created) has an empty HEAD diff and
+	// no error; show its full content so a single-file diff is never "clean".
+	if err == nil && strings.TrimSpace(out) == "" && len(pathspec) == 1 {
+		if u := untrackedDiff(ctx, path, pathspec[0]); u != "" {
+			return u, nil
+		}
 	}
 	return out, err
+}
+
+// untrackedDiff returns the full content of an untracked file as an add-only diff
+// via `git diff --no-index` (which exits non-zero when files differ, so its
+// stdout is read directly). Empty for tracked or absent paths.
+func untrackedDiff(ctx context.Context, dir, rel string) string {
+	st, err := runGitRaw(ctx, dir, "status", "--porcelain", "--", rel)
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(st), "??") {
+		return ""
+	}
+	out, _ := exec.CommandContext(ctx, "git", "-C", dir, "diff", "--no-index", "--", os.DevNull, rel).Output()
+	return strings.TrimRight(string(out), "\r\n")
+}
+
+// StatusLines returns the non-empty `git status --porcelain` lines, a lightweight
+// way to learn which files are dirty without the full Detail gather.
+func StatusLines(ctx context.Context, path string) ([]string, error) {
+	out, err := runGitRaw(ctx, path, "status", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, nil
 }
 
 // WebURL returns the browsable https URL for a repo's origin remote, or "".

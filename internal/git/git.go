@@ -168,6 +168,18 @@ func Status(ctx context.Context, seed repo.Repo) (repo.Repo, error) {
 // activityWeeks is how many weekly buckets the dashboard sparkline summarizes.
 const activityWeeks = 12
 
+// CountCommitsSince returns how many commits on HEAD have a commit date after
+// `since` (0 on error). Used to flag that a repo has moved on since Claude last
+// ran there.
+func CountCommitsSince(ctx context.Context, path string, since time.Time) int {
+	out, err := runGit(ctx, path, "rev-list", "--count", "--since="+since.Format(time.RFC3339), "HEAD")
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	return n
+}
+
 // CommitActivity returns commit counts per week for the last activityWeeks weeks
 // on the current branch, oldest bucket first, for the dashboard sparkline.
 func CommitActivity(ctx context.Context, path string) []int {

@@ -106,7 +106,11 @@ func (m model) overlayModal(box string, inner int) string {
 	// dim the view the modal was opened over (the detail page when it came from
 	// there, otherwise the dashboard) so closing returns you to the same place
 	base := m.dashboardBody(inner)
-	if m.returnMode == modeDetail && m.detail != nil {
+	ret := m.returnMode
+	if m.mode == modeTouched {
+		ret = m.touchedReturn // touched keeps its own return target (a diff reuses returnMode)
+	}
+	if ret == modeDetail && m.detail != nil {
 		base = m.detailView(inner)
 	}
 	backdrop := dimANSI(base, backdropNum, backdropDen)

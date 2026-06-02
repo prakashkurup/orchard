@@ -2,71 +2,20 @@
 
 A keyboard-driven terminal dashboard for your local git repositories. See every repo's branch, dirty / ahead / behind state, language, and last commit on one screen, then pull, fetch, switch branches, search, or open them in your editor, browser, or Claude Code.
 
-Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss).
-
 ![orchard dashboard](docs/screenshots/dashboard.png)
 
-> Tip: run `orchard preview` to print one frame of the dashboard to stdout.
+## Install
 
-## Why orchard
-
-Plenty of tools already show many git repos at once (`gita` and `mani` on the CLI; `gitpane`, `git-dash`, and `git-scope` as TUIs), and plenty of tools read your Claude Code transcripts, for usage stats (`ccusage`) or history search (`claude-history`). orchard is the one that puts it all in the same window: an interactive multi-repo git dashboard that also knows where you have been running Claude Code, launches it in any repo, and searches code across every repo at once.
-
-If you juggle many repositories and lean on Claude Code, orchard is the cockpit for that workflow. If you only ever work in one repo at a time, a single-repo TUI like `lazygit` will serve you better.
-
-## Features
-
-- **One-screen overview** of every repo: branch, clean/dirty/ahead/behind/diverged/detached, uncommitted + stash counts, dominant language, last-synced and last-commit times (color-coded by freshness).
-- **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, non-default branches, and repos with no upstream.
-- **Fetch, branch switch, multi-select** - act on one repo or many at once.
-- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or **Claude Code** (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
-- **Cross-repo code search** (`S`) that respects `.gitignore`.
-- **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
-- **Worklog** (`L`) - your own commits across all repos in a time window.
-- **Clone** (`+`) a new repo into the dashboard, or `orchard clone` a scoped GitHub org.
-- **Claude Code aware** - usage panel, a per-repo activity column, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code](#claude-code) below.
-- **Scriptable CLI** - `scan`, `pull`, `clone` with `--json` for cron and pipelines.
-
-## Claude Code
-
-orchard treats Claude Code as a first-class part of a multi-repo workflow. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR` if you have relocated them); nothing is sent anywhere.
-
-- **Usage panel** pinned under the list: total sessions, turns, repos used, last active, a model split, and your busiest repos.
-- **Per-repo CLAUDE column**: how long ago Claude last ran in each repo, colored by recency.
-- **Per-repo footprint in the detail view** (`enter`): that repo's recent sessions, total turns and tokens, and when Claude last ran there.
-- **Uncommitted-work flag**: when a repo is dirty *and* Claude ran there recently, the CLAUDE cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
-- **Launch** (`c`): open Claude Code in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
-- **Resume** (`C`): continue the most recent session in the current repo (`claude --continue`).
-- **Session history** (`H`): browse a repo's past sessions by their titles (turn count, model, age) and resume any one (`claude --resume <id>`).
-- **Search past sessions** (`R`): search the *content* of every repo's Claude sessions at once and resume the match in its own repo. For deep semantic search and a full conversation viewer, the dedicated [`claude-history`](https://github.com/raine/claude-history) is excellent; orchard's `R` is a quick cross-repo find-and-resume without leaving the dashboard.
-- **Draft a commit message** (`M`): Claude Code drafts a message from the working-tree diff *headlessly* (`claude -p`) and shows it in a window you can copy (`y`) or regenerate (`r`), without leaving the dashboard. Other assistants fall back to a terminal session.
-- **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. Each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
-- **Instructions health** (detail view + the `needs-md` filter): shows which repos have a `CLAUDE.md` / `AGENTS.md`, and flags repos where Claude runs with no project context, either no `CLAUDE.md` at all, or an `AGENTS.md` Claude won't read (Claude Code doesn't load `AGENTS.md` natively). `I` wires the latter up by creating a `CLAUDE.md` that imports `@AGENTS.md` (only where there's no `CLAUDE.md` yet; it never edits an existing one).
-- **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
-- **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
-- **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `copilot` found on your `PATH`.
-
-### Claude Code panel or column empty?
-
-The usage panel and CLAUDE column reflect repos you have **actually run Claude Code in** (as the working directory), not just that Claude is installed. If they look empty:
-
-- **Use Claude in a repo first.** Run `claude` inside one of the repos once; the panel and column fill from past sessions, not from installation.
-- **Point orchard at the right root.** They only cover repos under orchard's root, so set `--root` / `ORCHARD_ROOT` to where you actually work with Claude.
-- **Relocated config?** orchard reads `~/.claude`, or `$CLAUDE_CONFIG_DIR` when you have moved Claude's config there.
-- **The `c` launcher is missing?** orchard needs `claude` on your `PATH` (a shell alias or function does not count) or `ORCHARD_AI_CMD=/full/path/to/claude`. GUI launches often have a thinner `PATH` than your terminal.
-
-## Requirements
+### Requirements
 
 - **Platforms:** macOS and Linux (amd64/arm64). Windows is not supported yet.
-- **Build:** Go **1.24+**.
 - **Runtime:** `git` on your `PATH`.
+- **Build:** Go **1.24+** only if you install from source or with `go install`.
 - **Optional:**
   - A [Nerd Font](https://www.nerdfonts.com/) for the icons (any other monospace font works; icons just render as boxes).
   - [`gh`](https://cli.github.com/) (GitHub CLI) - used by `orchard clone --org` for auth if `GITHUB_TOKEN` isn't set.
   - [`claude`](https://claude.com/claude-code) - for the `c` key (launch Claude Code) and the usage panel.
   - A supported terminal for new-tab launches: Ghostty, iTerm2, WezTerm, tmux, or macOS Terminal (otherwise it falls back to running in place).
-
-## Install
 
 ### Download a release (no Go required)
 
@@ -122,21 +71,106 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 
 `orchard` scans **one root folder** and treats each immediate subdirectory that contains a `.git` as a repository. (If the root itself is a repo, it shows just that one.)
 
-**Telling orchard where your repos are.** The root defaults to your **current directory**, so `cd ~/code && orchard` just works. To point elsewhere (highest precedence first): pass `--root ~/code`, set `ORCHARD_ROOT=~/code` (persistent, no file needed), or put `root:` in a config file. Most people only ever need `--root` or `ORCHARD_ROOT`; the config file is optional.
+The root defaults to your **current directory**, so `cd ~/code && orchard` just works. To make a root persistent, see [Configuration](#configuration).
+
+## Why orchard
+
+Most tools either manage many repos or inspect AI assistant history. orchard combines both: an interactive multi-repo git dashboard that knows where you have been running Claude Code, launches it in any repo, and searches code across every repo at once.
+
+If you know the space, `gita`, `mani`, `gitpane`, `git-dash`, and `git-scope` cover multi-repo git workflows; `ccusage` and `claude-history` cover Claude usage and history. orchard puts the local repo dashboard and Claude-aware workflow in the same window.
+
+If you juggle many repositories and lean on Claude Code, orchard is the cockpit for that workflow. If you only ever work in one repo at a time, a single-repo TUI like `lazygit` will serve you better.
+
+## Features
+
+- **One-screen overview** of every repo: branch, clean/dirty/ahead/behind/diverged/detached, uncommitted + stash counts, dominant language, last-synced and last-commit times (color-coded by freshness).
+- **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, non-default branches, and repos with no upstream.
+- **Fetch, branch switch, multi-select** - act on one repo or many at once.
+- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or **Claude Code** (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
+- **Cross-repo code search** (`S`) that respects `.gitignore`.
+- **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
+- **Worklog** (`L`) - your own commits across all repos in a time window.
+- **Clone** (`+`) a new repo into the dashboard, or `orchard clone` a scoped GitHub org.
+- **Claude Code aware** - usage panel, a per-repo activity column, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code](#claude-code) below.
+- **Scriptable CLI** - `scan`, `pull`, `clone` with `--json` for cron and pipelines.
+
+## Claude Code
+
+orchard treats Claude Code as a first-class part of a multi-repo workflow. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR` if you have relocated them); nothing is sent anywhere.
+
+### See activity
+
+- **Usage panel** pinned under the list: total sessions, turns, repos used, last active, a model split, and your busiest repos.
+- **Per-repo CLAUDE column**: how long ago Claude last ran in each repo, colored by recency.
+- **Per-repo footprint in the detail view** (`enter`): that repo's recent sessions, total turns and tokens, and when Claude last ran there.
+- **Uncommitted-work flag**: when a repo is dirty *and* Claude ran there recently, the CLAUDE cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
+- **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
+- **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
+
+### Resume and search sessions
+
+- **Resume** (`C`): continue the most recent session in the current repo (`claude --continue`).
+- **Session history** (`H`): browse a repo's past sessions by their titles (turn count, model, age) and resume any one (`claude --resume <id>`).
+- **Search past sessions** (`R`): search the *content* of every repo's Claude sessions at once and resume the match in its own repo. For deep semantic search and a full conversation viewer, the dedicated [`claude-history`](https://github.com/raine/claude-history) is excellent; orchard's `R` is a quick cross-repo find-and-resume without leaving the dashboard.
+
+### Launch Claude across repos
+
+- **Launch** (`c`): open Claude Code in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
+- **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. Each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
+
+### Draft commit messages
+
+- **Draft a commit message** (`M`): Claude Code drafts a message from the working-tree diff *headlessly* (`claude -p`) and shows it in a window you can copy (`y`) or regenerate (`r`), without leaving the dashboard. Other assistants fall back to a terminal session.
+
+### Keep instructions healthy
+
+- **Instructions health** (detail view + the `needs-md` filter): shows which repos have a `CLAUDE.md` / `AGENTS.md`, and flags repos where Claude runs with no project context, either no `CLAUDE.md` at all, or an `AGENTS.md` Claude won't read (Claude Code doesn't load `AGENTS.md` natively). `I` wires the latter up by creating a `CLAUDE.md` that imports `@AGENTS.md` (only where there's no `CLAUDE.md` yet; it never edits an existing one).
+
+### Adapt to your setup
+
+- **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `copilot` found on your `PATH`.
+
+### Claude Code panel or column empty?
+
+The usage panel and CLAUDE column reflect repos you have **actually run Claude Code in** (as the working directory), not just that Claude is installed. If they look empty:
+
+- **Use Claude in a repo first.** Run `claude` inside one of the repos once; the panel and column fill from past sessions, not from installation.
+- **Point orchard at the right root.** They only cover repos under orchard's root, so set `--root` / `ORCHARD_ROOT` to where you actually work with Claude.
+- **Relocated config?** orchard reads `~/.claude`, or `$CLAUDE_CONFIG_DIR` when you have moved Claude's config there.
+- **The `c` launcher is missing?** orchard needs `claude` on your `PATH` (a shell alias or function does not count) or `ORCHARD_AI_CMD=/full/path/to/claude`. GUI launches often have a thinner `PATH` than your terminal.
 
 ## TUI keys
+
+Press `?` in-app for the same keymap and legend.
+
+### Navigate and select
 
 | Key | Action |
 |-----|--------|
 | `↑ ↓` / `j k` | move · `g` / `G` top / bottom |
+| mouse | click a row to select, wheel to scroll (disable with `ORCHARD_NO_MOUSE=1`) |
 | `n` | jump to next repo with new commits since last visit |
 | `space` / `a` | select current / select all visible |
 | `x` | clear all selections |
+| `y` | copy the current repo's path to the clipboard |
+
+### Git and repo actions
+
+| Key | Action |
+|-----|--------|
 | `enter` | repo detail (languages, instructions, GitHub PR/CI, Claude footprint, working tree, commit graph, remotes) |
 | `d` | view the working-tree diff (vs HEAD) |
 | `p` / `P` | pull selected / all (fast-forward only) |
 | `f` / `F` | fetch selected / all |
 | `b` | switch branch |
+| `e` / `E` | open in editor / change default editor |
+| `O` | open repo(s) in browser (confirms for >1 repo) |
+| `+` | clone a repo into the dashboard |
+
+### Claude actions
+
+| Key | Action |
+|-----|--------|
 | `c` | open Claude Code in a new tab (confirms for >1 repo) |
 | `C` | resume the last Claude Code session in the current repo |
 | `H` | browse past Claude Code sessions for the current repo and resume any one |
@@ -144,14 +178,23 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 | `A` | one Claude Code session across the selected repos: opens in the first selected, the rest attached via `--add-dir` (`space`-select 2+ first) |
 | `M` | draft a commit message (Claude Code drafts it in a window to copy / regenerate) |
 | `I` | wire `AGENTS.md` into a new `CLAUDE.md` for the selected repos (so Claude reads it) |
-| `e` / `E` | open in editor / change default editor |
-| `O` | open repo(s) in browser (confirms for >1 repo) |
+| `W` | workspace presets: save a repo set, then launch a cross-repo session (`A`) on it |
+
+### Search, stats, and filtering
+
+| Key | Action |
+|-----|--------|
 | `S` | search code across all repos |
 | `L` | worklog - your commits across repos |
 | `T` | stats page (languages, freshest/thirstiest, Claude usage, harvest + Claude heatmaps) |
-| `+` | clone a repo into the dashboard |
-| `/` | filter by text, or a `branch:` / `name:` prefix · `tab` cycles quick filters (attention, dirty, behind, feature, at-risk, ai-touched, needs-md) |
+| `/` | filter by text, or a `branch:` / `name:` prefix |
+| `tab` | cycle quick filters (attention, dirty, behind, feature, at-risk, ai-touched, needs-md) |
 | `s` / `o` | cycle sort (attention / name / synced / claude) / toggle grouping |
+
+### App
+
+| Key | Action |
+|-----|--------|
 | `r` / `w` | refresh now / toggle live auto-refresh |
 | `?` / `q` | help & legend / quit |
 
@@ -179,19 +222,31 @@ Common flags: `--root PATH`, `--concurrency N`. `--json` is supported by `scan`,
 
 ## Configuration
 
-All settings are optional; the default root is your current directory, so the simplest setup is no config at all. **Precedence:** CLI flags → environment variables → config file → built-in defaults.
+All settings are optional; the default root is your current directory, so the simplest setup is no config at all.
 
-The `orchard config` **command** doesn't change anything: it prints the resolved settings (root, concurrency, and which config file, if any) so you can confirm what orchard will use. The config **file** below is only worth creating if you want persistent defaults or use `orchard clone` (which needs `org` / `scope`).
+If you only need to tell orchard where your repos live, pick one:
 
-**Environment variables**
+1. Run it from that folder: `cd ~/code && orchard`
+2. Pass a root for one launch: `orchard --root ~/code`
+3. Persist the root with your shell: `export ORCHARD_ROOT=~/code`
+4. Use a config file when you also want saved clone defaults like `org` / `scope`
+
+**Precedence:** CLI flags → environment variables → config file → built-in defaults.
+
+The `orchard config` **command** doesn't change anything: it prints the resolved settings (root, concurrency, and which config file, if any) so you can confirm what orchard will use.
+
+### Environment variables
 
 - `ORCHARD_ROOT` - default repo folder.
 - `ORCHARD_CONFIG` - explicit config file path.
 - `GITHUB_TOKEN` - token for `orchard clone` (falls back to `gh auth token`).
 - `ORCHARD_ADDDIR_MEMORY` - set to `0` to stop a cross-repo Claude session (`A`) from loading the added repos' `CLAUDE.md` (on by default).
 - `ORCHARD_NO_UPDATE_CHECK` - set to `1` to disable the daily check for a newer release.
+- `ORCHARD_NO_MOUSE` - set to `1` to disable mouse capture (so your terminal's native text selection works).
 
-**Config file** is a small `key: value` format with one nested `scope:` section. Copy [`config.example.yaml`](config.example.yaml) to `config.yaml`. Search order: `--config` → `$ORCHARD_CONFIG` → `./config.yaml` → next to the binary → `$XDG_CONFIG_HOME/orchard/config.yaml`.
+### Advanced config file
+
+The config file is a small `key: value` format with one nested `scope:` section. Copy [`config.example.yaml`](config.example.yaml) to `config.yaml`. Search order: `--config` → `$ORCHARD_CONFIG` → `./config.yaml` → next to the binary → `$XDG_CONFIG_HOME/orchard/config.yaml`.
 
 ```yaml
 root: ~/Documents/GitHub
@@ -218,6 +273,8 @@ Privacy details:
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ## Development
+
+Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss).
 
 ```sh
 make build       # build ./orchard

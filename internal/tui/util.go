@@ -161,6 +161,16 @@ func fit(s string, width int) string {
 	return runewidth.Truncate(s, width, "…")
 }
 
+func fitStyled(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "")
+}
+
 // fitLeft truncates from the left with a leading ellipsis, so the meaningful
 // tail (e.g. a file's basename) stays visible when a path is too long. Width is
 // measured with ansi.StringWidth throughout to match ansi.TruncateLeft's metric,
