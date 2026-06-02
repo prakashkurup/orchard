@@ -60,7 +60,10 @@ func (m model) openCommitMessage(r repo.Repo) (tea.Model, tea.Cmd) {
 
 func commitMsgCmd(assistantCmd string, r repo.Repo) tea.Cmd {
 	if demoMode() {
-		return func() tea.Msg { return commitMsgMsg{path: r.Path, text: demoCommitMsg()} }
+		// simulate the headless draft delay so the drafting animation is visible
+		return tea.Tick(1600*time.Millisecond, func(time.Time) tea.Msg {
+			return commitMsgMsg{path: r.Path, text: demoCommitMsg()}
+		})
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

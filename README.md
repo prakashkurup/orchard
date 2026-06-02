@@ -2,7 +2,7 @@
 
 A keyboard-driven terminal dashboard for your local git repositories. See every repo's branch, dirty / ahead / behind state, language, and last commit on one screen, then pull, fetch, switch branches, search, or open them in your editor, browser, or Claude Code.
 
-![orchard dashboard](docs/screenshots/dashboard.png)
+![orchard demo](docs/screenshots/demo.gif)
 
 ## Install
 
