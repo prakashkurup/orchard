@@ -45,8 +45,12 @@ func encode(p string) string {
 	return strings.NewReplacer("/", "-", ".", "-").Replace(p)
 }
 
-// ProjectsRoot is ~/.claude/projects.
+// ProjectsRoot is the transcript directory: $CLAUDE_CONFIG_DIR/projects when that
+// env var relocates Claude's config, else ~/.claude/projects.
 func ProjectsRoot() string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, "projects")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

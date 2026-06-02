@@ -29,7 +29,7 @@ If you juggle many repositories and lean on Claude Code, orchard is the cockpit 
 
 ## Claude Code
 
-orchard treats Claude Code as a first-class part of a multi-repo workflow. Everything is read locally from your `~/.claude` transcripts; nothing is sent anywhere.
+orchard treats Claude Code as a first-class part of a multi-repo workflow. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR` if you have relocated them); nothing is sent anywhere.
 
 - **Usage panel** pinned under the list: total sessions, turns, repos used, last active, a model split, and your busiest repos.
 - **Per-repo CLAUDE column**: how long ago Claude last ran in each repo, colored by recency.
@@ -45,6 +45,15 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 - **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
 - **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
 - **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `copilot` found on your `PATH`.
+
+### Claude Code panel or column empty?
+
+The usage panel and CLAUDE column reflect repos you have **actually run Claude Code in** (as the working directory), not just that Claude is installed. If they look empty:
+
+- **Use Claude in a repo first.** Run `claude` inside one of the repos once; the panel and column fill from past sessions, not from installation.
+- **Point orchard at the right root.** They only cover repos under orchard's root, so set `--root` / `ORCHARD_ROOT` to where you actually work with Claude.
+- **Relocated config?** orchard reads `~/.claude`, or `$CLAUDE_CONFIG_DIR` when you have moved Claude's config there.
+- **The `c` launcher is missing?** orchard needs `claude` on your `PATH` (a shell alias or function does not count) or `ORCHARD_AI_CMD=/full/path/to/claude`. GUI launches often have a thinner `PATH` than your terminal.
 
 ## Requirements
 

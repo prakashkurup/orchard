@@ -29,6 +29,7 @@ func TestEncode(t *testing.T) {
 func TestSummaryIncludesSubdirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	repoPath := "/Users/me/Documents/GitHub/foo"
 	enc := encode(repoPath)
 	proj := filepath.Join(home, ".claude", "projects")
@@ -73,6 +74,7 @@ func TestSummaryIncludesSubdirs(t *testing.T) {
 func TestSessionTitle(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	repoPath := "/Users/me/Documents/GitHub/bar"
 	dir := filepath.Join(home, ".claude", "projects", encode(repoPath))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -112,6 +114,7 @@ func TestSessionTitle(t *testing.T) {
 func TestAggregate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	repoPath := "/Users/me/Documents/GitHub/bar"
 	d := filepath.Join(home, ".claude", "projects", encode(repoPath))
 	if err := os.MkdirAll(d, 0o755); err != nil {
@@ -125,5 +128,18 @@ func TestAggregate(t *testing.T) {
 	}
 	if u.Models["opus-4.8"] != 1 {
 		t.Fatalf("models = %v", u.Models)
+	}
+}
+
+func TestProjectsRootHonorsConfigDir(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/cc")
+	if got := ProjectsRoot(); got != filepath.Join("/custom/cc", "projects") {
+		t.Fatalf("with CLAUDE_CONFIG_DIR set, ProjectsRoot = %q", got)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "") // empty falls back to HOME/.claude
+	if got, want := ProjectsRoot(), filepath.Join(home, ".claude", "projects"); got != want {
+		t.Fatalf("fallback = %q, want %q", got, want)
 	}
 }

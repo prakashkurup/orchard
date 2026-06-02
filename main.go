@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"regexp"
@@ -62,6 +63,20 @@ func run(args []string) error {
 
 	if len(args) == 0 {
 		return tui.Run(cfg.Root, cfg.Concurrency)
+	}
+
+	// A bare launch with flags (e.g. `orchard --root PATH`) has no subcommand;
+	// parse the TUI flags here rather than treating "--root" as a command.
+	if strings.HasPrefix(args[0], "-") {
+		if args[0] == "-h" || args[0] == "--help" {
+			printUsage()
+			return nil
+		}
+		root, concurrency, err := tuiFlags(args, cfg)
+		if err != nil {
+			return err
+		}
+		return tui.Run(root, concurrency)
 	}
 
 	switch args[0] {
@@ -242,6 +257,19 @@ Examples:
   orchard scan --root ~/Documents/GitHub
   orchard pull --root ~/Documents/GitHub --all
   orchard clone --root ~/Documents/GitHub --org my-org --match '^service-'`)
+}
+
+// tuiFlags parses the flags accepted by a bare `orchard` launch (no subcommand):
+// --root and --concurrency, falling back to the resolved config.
+func tuiFlags(args []string, cfg config.Config) (string, int, error) {
+	fs := flag.NewFlagSet("orchard", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	root := fs.String("root", cfg.Root, "folder containing git repositories")
+	concurrency := fs.Int("concurrency", cfg.Concurrency, "maximum parallel git operations")
+	if err := fs.Parse(args); err != nil {
+		return "", 0, err
+	}
+	return *root, *concurrency, nil
 }
 
 func splitGlobalFlags(args []string) (string, []string, error) {

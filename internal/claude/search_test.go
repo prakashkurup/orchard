@@ -10,6 +10,7 @@ import (
 func TestSearchSessions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 
 	repoPath := "/work/acme"
 	dir := filepath.Join(home, ".claude", "projects", encode(repoPath))
