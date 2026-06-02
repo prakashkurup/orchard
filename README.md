@@ -122,6 +122,8 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 
 `orchard` scans **one root folder** and treats each immediate subdirectory that contains a `.git` as a repository. (If the root itself is a repo, it shows just that one.)
 
+**Telling orchard where your repos are.** The root defaults to your **current directory**, so `cd ~/code && orchard` just works. To point elsewhere (highest precedence first): pass `--root ~/code`, set `ORCHARD_ROOT=~/code` (persistent, no file needed), or put `root:` in a config file. Most people only ever need `--root` or `ORCHARD_ROOT`; the config file is optional.
+
 ## TUI keys
 
 | Key | Action |
@@ -130,7 +132,7 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 | `n` | jump to next repo with new commits since last visit |
 | `space` / `a` | select current / select all visible |
 | `x` | clear all selections |
-| `enter` | repo detail (status, commit graph, remotes, languages) |
+| `enter` | repo detail (languages, instructions, GitHub PR/CI, Claude footprint, working tree, commit graph, remotes) |
 | `d` | view the working-tree diff (vs HEAD) |
 | `p` / `P` | pull selected / all (fast-forward only) |
 | `f` / `F` | fetch selected / all |
@@ -157,26 +159,29 @@ orchard pull --root ~/code --all      # fast-forward every eligible repo
 
 ```
 orchard [--config PATH]                  start the TUI
-orchard [--config PATH] scan    [flags]  print repo status
-orchard [--config PATH] pull    [flags]  fast-forward eligible repos
+orchard [--config PATH] scan    [flags]  scan local repos
+orchard [--config PATH] pull    [flags]  safely pull eligible repos
 orchard [--config PATH] clone   [flags]  clone scoped GitHub org repos
 orchard [--config PATH] preview [flags]  render the dashboard once
 orchard [--config PATH] config           show resolved configuration
-orchard [--config PATH] stats            summarize the orchard (languages, harvest)
+orchard [--config PATH] stats            summarize the orchard
+orchard update                           update orchard to the latest release
 orchard version                          print the version
 orchard help
 ```
 
-Common flags: `--root PATH`, `--concurrency N`, `--json`. Run `orchard <cmd> -h` for per-command flags.
+Common flags: `--root PATH`, `--concurrency N`. `--json` is supported by `scan`, `pull`, and `clone` only. Run `orchard <cmd> -h` for per-command flags.
 
 - `scan` - `--root`, `--concurrency`, `--json`
 - `pull` - `--all` **or** `--match RE`, `--root`, `--concurrency`, `--json`
 - `clone` - `--org` and `--match RE` (both required, so you never clone a whole org by accident), `--include-archived`, `--root`, `--concurrency`, `--json`
-- `preview` - `--width`, `--height`, `--group`, `--detail NAME`
+- `preview` - `--root`, `--concurrency`, `--width`, `--height`, `--group`, `--detail NAME`
 
 ## Configuration
 
-All settings are optional. **Precedence:** CLI flags → environment variables → config file → built-in defaults.
+All settings are optional; the default root is your current directory, so the simplest setup is no config at all. **Precedence:** CLI flags → environment variables → config file → built-in defaults.
+
+The `orchard config` **command** doesn't change anything: it prints the resolved settings (root, concurrency, and which config file, if any) so you can confirm what orchard will use. The config **file** below is only worth creating if you want persistent defaults or use `orchard clone` (which needs `org` / `scope`).
 
 **Environment variables**
 
