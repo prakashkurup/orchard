@@ -7,10 +7,38 @@ import (
 	"github.com/prakashkurup/orchard/internal/claude"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/termlaunch"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 )
+
+// Opt-in env (Claude Code 2.1.20+) that loads added --add-dir repos' CLAUDE.md.
+// See github.com/anthropics/claude-code issues/21138.
+const claudeAddDirMemoryEnv = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1"
+
+// addDirMemoryEnv enables shared CLAUDE.md on a cross-repo launch; ORCHARD_ADDDIR_MEMORY=0 disables.
+func addDirMemoryEnv() []string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ORCHARD_ADDDIR_MEMORY"))) {
+	case "0", "false", "no", "off":
+		return nil
+	}
+	return []string{claudeAddDirMemoryEnv}
+}
+
+// envPrefix builds a `env K=V ...` shell prefix; the in-place fallback uses cmd.Env.
+func envPrefix(env []string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("env")
+	for _, kv := range env {
+		b.WriteString(" " + shQuote(kv))
+	}
+	b.WriteString(" ")
+	return b.String()
+}
 
 // selectionTargets is the set of repos an action applies to: the multi-select
 // if any, otherwise the repo under the cursor.
@@ -84,11 +112,12 @@ func shQuote(s string) string {
 // runAssistant launches the assistant once in cwd with the given flag args, in a
 // new terminal tab (falling back to running in place). The tab path goes through
 // a shell so args are shell-quoted; the in-place fallback uses argv directly.
-func (m model) runAssistant(cwd string, args []string, status string) (tea.Model, tea.Cmd) {
+func (m model) runAssistant(cwd string, args, env []string, status string) (tea.Model, tea.Cmd) {
 	prog := m.assistantCmd
 	for _, a := range args {
 		prog += " " + shQuote(a)
 	}
+	prog = envPrefix(env) + prog
 	if cmd, ok := termlaunch.NewTab(cwd, prog); ok && cmd != nil {
 		m.status = status
 		return m, func() tea.Msg {
@@ -101,6 +130,9 @@ func (m model) runAssistant(cwd string, args []string, status string) (tea.Model
 	fields := append(strings.Fields(m.assistantCmd), args...)
 	c := exec.Command(fields[0], fields[1:]...)
 	c.Dir = cwd
+	if len(env) > 0 {
+		c.Env = append(os.Environ(), env...)
+	}
 	return m, tea.ExecProcess(c, func(error) tea.Msg {
 		return statusMsg{text: "returned from " + m.assistantLabel}
 	})
@@ -116,7 +148,7 @@ func (m model) openClaudeResume(r repo.Repo) (tea.Model, tea.Cmd) {
 	if !m.assistantIsClaude() {
 		return m.openClaude([]repo.Repo{r})
 	}
-	return m.runAssistant(r.Path, []string{"--continue"}, "resuming "+m.assistantLabel+" · "+r.Name)
+	return m.runAssistant(r.Path, []string{"--continue"}, nil, "resuming "+m.assistantLabel+" · "+r.Name)
 }
 
 // openClaudeCombined opens one Claude session spanning the selected repos via
@@ -137,8 +169,12 @@ func (m model) openClaudeCombined(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	for _, r := range targets[1:] {
 		args = append(args, "--add-dir", r.Path)
 	}
+	mem := addDirMemoryEnv()
 	status := fmt.Sprintf("opening %s in %s + %d more via --add-dir", m.assistantLabel, targets[0].Name, len(targets)-1)
-	return m.runAssistant(targets[0].Path, args, status)
+	if len(mem) > 0 {
+		status += " (shared CLAUDE.md)"
+	}
+	return m.runAssistant(targets[0].Path, args, mem, status)
 }
 
 // commitMsgPrompt is the prompt used when drafting a commit message in a terminal

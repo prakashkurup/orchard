@@ -146,6 +146,10 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "T":
 		return m.openStats()
+	case "I":
+		return m.requestWire(m.selectionTargets())
+	case "R":
+		return m.openSessionSearch()
 	case "b":
 		if r, ok := m.currentRepo(); ok {
 			return m.openBranchSwitcher(r)
@@ -357,36 +361,32 @@ func (m model) gridHeader(width int) string {
 func (m model) footerView(width int) string {
 	rule := hrule(width)
 	var line string
-	if m.filtering {
+	// footer packs as many keys as fit (priority order), context-aware, always
+	// ending with ? help · q quit; the full grouped keymap lives in ? help.
+	switch {
+	case m.filtering:
 		prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Background(lipgloss.Color(bg)).Bold(true).Render(" / ")
 		line = fillLine(prompt+lipgloss.NewStyle().Background(lipgloss.Color(bg)).Foreground(lipgloss.Color(ice)).Render(m.filterInput.View())+subtleStyle.Render("   enter apply · esc clear"), width, bg)
-	} else {
-		// essentials only - the full keymap + legend lives in the ? help overlay
-		hints := []string{
-			cmdHint("⏎", "detail"),
-			cmdHint("space", "select"),
-			cmdHint("x", "clear"),
-			cmdHint("p", "pull"),
-			cmdHint("b", "branch"),
-		}
+	case len(m.selected) > 0:
+		n := len(m.selected)
+		lead := subtleStyle.Render(fmt.Sprintf(" %d selected   ", n))
+		opts := []string{cmdHint("p", "pull")}
 		if m.assistantCmd != "" {
-			hints = append(hints, cmdHint("c", m.assistantLabel))
+			opts = append(opts, cmdHint("A", fmt.Sprintf("%s ×%d", m.assistantLabel, n)), cmdHint("M", "commit msg"), cmdHint("I", "wire md"))
 		}
-		hints = append(hints,
-			cmdHint("O", "browser"),
-			cmdHint("+", "clone"),
-			cmdHint("S", "search"),
-			cmdHint("/", "filter"),
-			cmdHint("?", "help"),
-			cmdHint("q", "quit"),
+		opts = append(opts, cmdHint("x", "clear"))
+		line = fillLine(lead+packHints(width-lipgloss.Width(lead), opts, []string{cmdHint("?", "help")}), width, bg)
+	default:
+		opts := []string{cmdHint("⏎", "detail")}
+		if m.assistantCmd != "" {
+			opts = append(opts, cmdHint("c", m.assistantLabel))
+		}
+		opts = append(opts,
+			cmdHint("p", "pull"), cmdHint("/", "filter"), cmdHint("tab", "quick filter"),
+			cmdHint("space", "select"), cmdHint("s", "sort"), cmdHint("d", "diff"),
+			cmdHint("S", "search"), cmdHint("R", "find sessions"), cmdHint("T", "stats"), cmdHint("L", "worklog"),
 		)
-		joined := strings.Join(hints, "")
-		if lipgloss.Width(joined) > width {
-			joined = strings.Join([]string{
-				cmdHint("⏎", "detail"), cmdHint("p", "pull"), cmdHint("?", "help"), cmdHint("q", "quit"),
-			}, "")
-		}
-		line = fillLine(joined, width, bg)
+		line = fillLine(packHints(width, opts, []string{cmdHint("?", "help"), cmdHint("q", "quit")}), width, bg)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, rule, line)
 }
@@ -394,6 +394,25 @@ func (m model) footerView(width int) string {
 func cmdHint(keyName, label string) string {
 	key := lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Background(lipgloss.Color(bg)).Bold(true)
 	return subtleStyle.Render("[") + key.Render(keyName) + subtleStyle.Render("] "+label+"   ")
+}
+
+// packHints includes opts in order while they fit, then always appends tail
+// (e.g. ? help · q quit), so the most important keys stay visible at any width.
+func packHints(width int, opts, tail []string) string {
+	t := strings.Join(tail, "")
+	budget := width - lipgloss.Width(t)
+	if budget < 0 {
+		budget = 0
+	}
+	var b strings.Builder
+	for _, h := range opts {
+		if lipgloss.Width(b.String())+lipgloss.Width(h) > budget {
+			break
+		}
+		b.WriteString(h)
+	}
+	b.WriteString(t)
+	return b.String()
 }
 
 func (m model) renderGrid(width int) string {

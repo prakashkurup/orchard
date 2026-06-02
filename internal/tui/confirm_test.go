@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/prakashkurup/orchard/internal/repo"
 )
 
 func TestRequestClaudeConfirmsOnlyForMultiple(t *testing.T) {
@@ -141,5 +142,25 @@ func TestConfirmEnterWithNoCancels(t *testing.T) {
 	got := mm.(model)
 	if got.mode != modeList || got.status != "cancelled" || got.confirmRepos != nil {
 		t.Fatalf("enter+No: mode=%v status=%q, want list/cancelled/cleared", got.mode, got.status)
+	}
+}
+
+// Cancelling a confirm opened from the detail view must return there, not the
+// list (both the esc and the enter+No paths).
+func TestConfirmCancelReturnsToOrigin(t *testing.T) {
+	mk := func() model {
+		m := newModel("root", 4)
+		m.mode = modeConfirm
+		m.returnMode = modeDetail
+		m.confirmRepos = []repo.Repo{{Path: "/x"}}
+		return m
+	}
+	enterNo := mk()
+	enterNo.confirmYes = false
+	if got, _ := enterNo.handleConfirmKey(tea.KeyMsg{Type: tea.KeyEnter}); got.(model).mode != modeDetail {
+		t.Fatalf("enter+No should return to detail, got %v", got.(model).mode)
+	}
+	if got, _ := mk().handleConfirmKey(tea.KeyMsg{Type: tea.KeyEsc}); got.(model).mode != modeDetail {
+		t.Fatalf("esc should return to detail, got %v", got.(model).mode)
 	}
 }

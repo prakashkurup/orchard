@@ -55,6 +55,8 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openSessions(m.repoByPath(m.detailRepo))
 	case "M":
 		return m.openCommitMessage(m.repoByPath(m.detailRepo))
+	case "I":
+		return m.requestWire([]repo.Repo{m.repoByPath(m.detailRepo)})
 	case "d":
 		return m.openDiff(m.repoByPath(m.detailRepo))
 	case "b":
@@ -135,6 +137,27 @@ func (m model) detailBody(width int) string {
 			parts += seg(l.Color, glyph+" ") + seg(ice, l.Name) + seg(muted, fmt.Sprintf(" %d%%", l.Pct))
 		}
 		rows = append(rows, line(segB(blue, "  "+iconCommit+"  Languages")), line(parts))
+	}
+
+	// Instructions - whether Claude has project context here (CLAUDE.md / AGENTS.md)
+	if s, ok := m.instructionsByPath[m.detailRepo]; ok {
+		rows = append(rows, blank, line(segB(blue, "  "+iconCommit+"  Instructions")))
+		mark := func(have bool) string {
+			if have {
+				return seg(green, iconCheck)
+			}
+			return seg(muted, "·")
+		}
+		row := seg(muted, "    ") + mark(s.hasClaude) + seg(ice, " CLAUDE.md") + seg(muted, "    ") + mark(s.hasAgents) + seg(ice, " AGENTS.md")
+		rows = append(rows, line(row))
+		switch {
+		case s.canWire():
+			rows = append(rows, line(seg(orange, "    AGENTS.md not loaded by Claude")+seg(muted, " · press ")+seg(blue, "I")+seg(muted, " to wire @AGENTS.md")))
+		case s.hasClaude && s.hasAgents && !s.imports:
+			rows = append(rows, line(seg(orange, "    CLAUDE.md does not import @AGENTS.md")+seg(muted, " · add it to load AGENTS.md")))
+		case s.blind():
+			rows = append(rows, line(seg(orange, "    no CLAUDE.md")+seg(muted, " · Claude runs here with no project context")))
+		}
 	}
 
 	// GitHub - open PRs + CI status (only when fetched for this repo)
@@ -375,11 +398,20 @@ func (m model) detailView(width int) string {
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(stateChip))
 	topLine := fillLine(left+fillLine("", gap, bg)+stateChip, width, bg)
 	rule := hrule(width)
-	hints := fillLine(strings.Join([]string{
-		cmdHint("esc", "back"), cmdHint("↑↓", "scroll"), cmdHint("p", "pull"),
+	full := []string{
+		cmdHint("esc", "back"), cmdHint("↑↓", "scroll"),
 		cmdHint("c", "claude"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
-		cmdHint("M", "commit msg"), cmdHint("e", "editor"), cmdHint("O", "browser"),
-	}, ""), width, bg)
+		cmdHint("M", "commit msg"), cmdHint("I", "wire md"), cmdHint("d", "diff"), cmdHint("b", "branch"),
+		cmdHint("p", "pull"), cmdHint("e", "editor"), cmdHint("O", "browser"),
+	}
+	joined := strings.Join(full, "")
+	if lipgloss.Width(joined) > width {
+		joined = strings.Join([]string{
+			cmdHint("esc", "back"), cmdHint("c", "claude"), cmdHint("d", "diff"),
+			cmdHint("M", "commit msg"), cmdHint("b", "branch"),
+		}, "")
+	}
+	hints := fillLine(joined, width, bg)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		topLine,

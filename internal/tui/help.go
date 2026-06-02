@@ -60,36 +60,54 @@ func (m model) helpBody(width int) string {
 	rows = append(rows, line(fg(green).Bold(true).Render("    ▁▄█")+fg(ice).Render("   ACTIVITY: weekly commit cadence over the last 12 weeks")))
 	rows = append(rows, line(fg(claudeC).Bold(true).Render("    3h")+fg(ice).Render("   CLAUDE: last Claude Code session ")+fg(red).Render("(red !  = Claude-edited, uncommitted)")))
 
-	rows = append(rows, line(""), line(fg(blue).Bold(true).Render("  KEYS")))
-	keys := [][2]string{
-		{"↑↓ / j k", "move"},
-		{"g / G", "top / bottom"},
-		{"n", "jump to next repo with new commits"},
-		{"space / a", "select current / select all visible"},
-		{"x", "clear all selections"},
-		{"enter", "repo detail (status, graph, remotes)"},
-		{"d", "view the working-tree diff (vs HEAD)"},
-		{"p / P", "pull selected / all (ff-only)"},
-		{"f / F", "fetch selected / all"},
-		{"b", "switch branch"},
-		{"c", "open Claude Code in new tab(s) · confirm if >1 repo"},
-		{"C", "resume the last Claude Code session in this repo"},
-		{"H", "browse and resume past Claude Code sessions for this repo"},
-		{"A", "one Claude session across selected repos (space-select 2+ first)"},
-		{"M", "draft a commit message in a window (copy / regenerate)"},
-		{"e / E", "open in editor / change default editor"},
-		{"O", "open repo(s) in browser · confirm if >1 repo"},
-		{"S", "search code across all repos"},
-		{"L", "worklog - your commits across repos"},
-		{"T", "stats page - languages, Claude usage, and heatmaps"},
-		{"+", "clone a repo into the dashboard"},
-		{"/", "filter by name   ·   tab quick filter"},
-		{"s / o", "cycle sort / toggle grouping"},
-		{"r / w", "refresh now / toggle live auto-refresh"},
-		{"? / q", "this help / quit"},
+	groups := []struct {
+		name string
+		keys [][2]string
+	}{
+		{"NAVIGATE", [][2]string{
+			{"↑↓ / j k", "move · g / G top / bottom"},
+			{"n", "jump to next repo with new commits"},
+		}},
+		{"SELECT", [][2]string{
+			{"space / a", "select current / all visible"},
+			{"x", "clear all selections"},
+		}},
+		{"GIT", [][2]string{
+			{"p / P", "pull selected / all (ff-only)"},
+			{"f / F", "fetch selected / all"},
+			{"b", "switch branch"},
+			{"r / w", "refresh now / toggle live refresh"},
+		}},
+		{"CLAUDE CODE", [][2]string{
+			{"c / C", "launch / resume last session"},
+			{"H", "browse and resume past sessions"},
+			{"A", "one session across selected repos (2+)"},
+			{"M", "draft a commit message in a window"},
+			{"I", "wire AGENTS.md into a new CLAUDE.md (selected)"},
+			{"R", "search all past sessions, then resume one"},
+		}},
+		{"INSPECT", [][2]string{
+			{"enter", "repo detail (status, graph, remotes)"},
+			{"d", "working-tree diff (vs HEAD)"},
+			{"L / T", "worklog / stats and heatmaps"},
+			{"S", "search code across all repos"},
+		}},
+		{"FILTER & SORT", [][2]string{
+			{"/", "filter: text, or branch: / name: prefix"},
+			{"tab", "quick filters: dirty, behind, feature, at-risk, ai-touched, needs-md (no CLAUDE.md)"},
+			{"s / o", "cycle sort / toggle grouping"},
+		}},
+		{"APP", [][2]string{
+			{"e / E", "open in editor / change default editor"},
+			{"O / +", "open in browser / clone a repo"},
+			{"? / q", "this help / quit"},
+		}},
 	}
-	for _, k := range keys {
-		rows = append(rows, line(fg(blue).Render("    "+padRight(k[0], 12))+fg(ice).Render("  "+k[1])))
+	for _, g := range groups {
+		rows = append(rows, line(""), line(fg(blue).Bold(true).Render("  "+g.name)))
+		for _, k := range g.keys {
+			rows = append(rows, line(fg(blue).Render("    "+padRight(k[0], 12))+fg(ice).Render("  "+k[1])))
+		}
 	}
 	return strings.Join(rows, "\n")
 }

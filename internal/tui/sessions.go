@@ -62,7 +62,7 @@ func (m model) handleSessionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		s := m.sessions[m.sessionCursor]
 		r := m.sessionsRepo
 		m.mode = m.returnMode
-		return m.runAssistant(r.Path, []string{"--resume", s.ID},
+		return m.runAssistant(r.Path, []string{"--resume", s.ID}, nil,
 			"resuming "+m.assistantLabel+" · "+r.Name)
 	}
 	return m, nil

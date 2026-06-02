@@ -5,7 +5,11 @@ import (
 	"github.com/prakashkurup/orchard/internal/repo"
 	"sort"
 	"strings"
+	"time"
 )
+
+// aiTouchedWindow: how recent a Claude run counts for the ai-touched filter.
+const aiTouchedWindow = 7 * 24 * time.Hour
 
 func (m *model) toggleCurrent() {
 	r, ok := m.currentRepo()
@@ -105,15 +109,30 @@ func (m model) passQuick(r repo.Repo) bool {
 		return r.Display == repo.DisplayBehind || r.Display == repo.DisplayDiverged
 	case filterFeature:
 		return r.Display == repo.DisplayFeature
+	case filterRisk:
+		return r.Dirty || r.Ahead > 0 || r.Stashes > 0
+	case filterAITouched:
+		return !r.CCLast.IsZero() && time.Since(r.CCLast) <= aiTouchedWindow
+	case filterNeedsInstr:
+		s, ok := m.instructionsByPath[r.Path]
+		return ok && s.blind() // only once instruction health is known (avoids startup flicker)
 	default:
 		return true
 	}
 }
 
+// repoMatches is the `/` filter: bare = name or branch; branch:/name: scope it.
 func repoMatches(r repo.Repo, q string) bool {
-	q = strings.ToLower(q)
-	return strings.Contains(strings.ToLower(r.Name), q) ||
-		strings.Contains(strings.ToLower(r.Branch), q)
+	q = strings.ToLower(strings.TrimSpace(q))
+	switch {
+	case strings.HasPrefix(q, "branch:"):
+		return strings.Contains(strings.ToLower(r.Branch), strings.TrimPrefix(q, "branch:"))
+	case strings.HasPrefix(q, "name:"):
+		return strings.Contains(strings.ToLower(r.Name), strings.TrimPrefix(q, "name:"))
+	default:
+		return strings.Contains(strings.ToLower(r.Name), q) ||
+			strings.Contains(strings.ToLower(r.Branch), q)
+	}
 }
 
 func (m *model) normalizeCursor() {

@@ -39,6 +39,7 @@ const (
 	modeDiff
 	modeStats
 	modeCommitMsg
+	modeSessionSearch
 )
 
 type sortMode int
@@ -72,7 +73,10 @@ const (
 	filterDirty
 	filterBehind
 	filterFeature
-	filterCount // sentinel: number of quick filters
+	filterRisk       // work at risk: uncommitted, unpushed, or stashed
+	filterAITouched  // Claude ran here recently
+	filterNeedsInstr // has AGENTS.md but Claude won't read it
+	filterCount      // sentinel: number of quick filters
 )
 
 func (q quickFilter) String() string {
@@ -85,6 +89,12 @@ func (q quickFilter) String() string {
 		return "behind"
 	case filterFeature:
 		return "feature"
+	case filterRisk:
+		return "at-risk"
+	case filterAITouched:
+		return "ai-touched"
+	case filterNeedsInstr:
+		return "needs-md"
 	default:
 		return "all"
 	}
@@ -173,6 +183,13 @@ type model struct {
 	commitMsgCopied  bool      // message was copied to the clipboard
 	commitMsgFrame   int       // animation frame for the drafting indicator
 
+	sessionSearchInput   textinput.Model
+	sessionSearchResults []claude.SessionHit
+	sessionSearchCursor  int
+	sessionSearchQuery   string
+	sessionSearchFocus   bool // true = editing the query, false = navigating results
+	sessionSearchRunning bool
+
 	searchInput   textinput.Model
 	searchVP      viewport.Model
 	searchResults []search.Result
@@ -187,9 +204,10 @@ type model struct {
 	worklogWindow string // git --since value, e.g. "1 day ago"
 	worklogText   string // plain-text digest for clipboard copy
 
-	newByPath   map[string]int       // repo path -> commits since last visit
-	langByPath  map[string]lang.Stat // repo path -> dominant language
-	seenChecked bool
+	newByPath          map[string]int        // repo path -> commits since last visit
+	langByPath         map[string]lang.Stat  // repo path -> dominant language
+	instructionsByPath map[string]instrState // repo path -> CLAUDE.md / AGENTS.md health
+	seenChecked        bool
 
 	konami      []string // recent arrow keys, for the bloom easter egg
 	bloomFrames int      // remaining frames of the bloom animation
@@ -318,6 +336,7 @@ func Preview(root string, concurrency, width, height int, grouped bool) (string,
 		m.langByPath = demoLangs()
 		m.newByPath = demoNew()
 		m.ghStatus = demoGHStatus()
+		m.instructionsByPath = demoInstr()
 		m.resize()
 		m.syncRows()
 		return m.View(), nil
@@ -386,9 +405,11 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 	m.detailRepo = target.Path
 	if demoMode() {
 		m.ghStatus = demoGHStatus()
+		m.instructionsByPath = demoInstr()
 		m.detail = &detailState{repo: target, info: demoDetail(target), langs: demoDetailLangs(target.Path), sessions: demoSessions()}
 	} else {
 		info, _ := orchardgit.Detail(ctx, target)
+		m.instructionsByPath = map[string]instrState{target.Path: detectInstr(target.Path)}
 		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path), sessions: claude.Sessions(target.Path, 10)}
 	}
 	m.setDetailContent()
@@ -431,6 +452,11 @@ func newModel(root string, concurrency int) model {
 	ci.Placeholder = "git URL or owner/repo…"
 	ci.CharLimit = 200
 
+	qi := textinput.New()
+	qi.Prompt = ""
+	qi.Placeholder = "search across all Claude sessions…"
+	qi.CharLimit = 200
+
 	// Inputs must paint their own background or the placeholder (256-color grey
 	// with no bg) falls through to the terminal default and shows as a grey box.
 	// Modal inputs sit on the panel; the dashboard filter and search on the app bg.
@@ -444,33 +470,36 @@ func newModel(root string, concurrency int) model {
 	ti.TextStyle = onBg.Foreground(lipgloss.Color(ice))
 	si.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
 	si.TextStyle = onBg.Foreground(lipgloss.Color(ice))
+	qi.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
+	qi.TextStyle = onBg.Foreground(lipgloss.Color(ice))
 
 	aCmd, aLabel, _ := resolveAssistant()
 
 	return model{
-		root:           root,
-		concurrency:    concurrency,
-		viewport:       vp,
-		detailVP:       dvp,
-		spinner:        sp,
-		filterInput:    ti,
-		searchInput:    si,
-		searchVP:       svp,
-		branchInput:    bi,
-		cloneInput:     ci,
-		selected:       map[string]bool{},
-		pulling:        map[string]bool{},
-		newByPath:      map[string]int{},
-		langByPath:     map[string]lang.Stat{},
-		editorID:       editor.DefaultID(),
-		sortMode:       sortName, // launch sorted by name (not the sortAttention zero value)
-		autoRefresh:    true,
-		loading:        true,
-		status:         tendingLine(),
-		assistantCmd:   aCmd,
-		assistantLabel: aLabel,
-		idleGen:        1,
-		idleAfter:      idleSeconds(),
+		root:               root,
+		concurrency:        concurrency,
+		viewport:           vp,
+		detailVP:           dvp,
+		spinner:            sp,
+		filterInput:        ti,
+		searchInput:        si,
+		searchVP:           svp,
+		branchInput:        bi,
+		cloneInput:         ci,
+		sessionSearchInput: qi,
+		selected:           map[string]bool{},
+		pulling:            map[string]bool{},
+		newByPath:          map[string]int{},
+		langByPath:         map[string]lang.Stat{},
+		editorID:           editor.DefaultID(),
+		sortMode:           sortName, // launch sorted by name (not the sortAttention zero value)
+		autoRefresh:        true,
+		loading:            true,
+		status:             tendingLine(),
+		assistantCmd:       aCmd,
+		assistantLabel:     aLabel,
+		idleGen:            1,
+		idleAfter:          idleSeconds(),
 	}
 }
 
@@ -513,7 +542,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncRows()
 		// recompute languages on every manual scan (startup / refresh / after
 		// clone) so newly-added repos get their language; claude usage too.
-		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos), ghStatusCmd(m.repos)}
+		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos)}
 		if !m.seenChecked { // "since last visit" baseline: once per launch only
 			m.seenChecked = true
 			cmds = append(cmds, newCommitsCmd(m.repos))
@@ -667,12 +696,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncRows() // a failing-CI flag may now show in the info column
 		return m, nil
 
+	case instrMsg:
+		m.instructionsByPath = msg.byPath
+		if m.mode == modeDetail {
+			m.setDetailContent() // reflect a just-wired CLAUDE.md in the detail view
+		}
+		m.syncRows()
+		return m, nil
+
+	case wireInstrMsg:
+		if msg.err != "" {
+			m.status = "wiring failed: " + msg.err
+		} else {
+			m.status = fmt.Sprintf("wired %d CLAUDE.md → AGENTS.md (%d skipped)", msg.wired, msg.skipped)
+		}
+		return m, instrCmd(m.repos) // refresh health
+
 	case statsMsg:
 		m.statsLoading = false
 		m.statsHarvest = msg.harvest
 		m.statsClaude = msg.claude
 		if m.mode == modeStats {
 			m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
+		}
+		return m, nil
+
+	case sessionSearchMsg:
+		if msg.query == m.sessionSearchQuery {
+			m.sessionSearchRunning = false
+			m.sessionSearchResults = msg.hits
+			m.sessionSearchFocus = false
+			m.sessionSearchInput.Blur()
+			m.sessionSearchCursor = 0
 		}
 		return m, nil
 
@@ -801,6 +856,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleStatsKey(msg)
 		case modeCommitMsg:
 			return m.handleCommitMsgKey(msg)
+		case modeSessionSearch:
+			return m.handleSessionSearchKey(msg)
 		case modeSearch:
 			return m.handleSearchKey(msg)
 		case modeDetail:
@@ -868,6 +925,8 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.sessionsView(inner), inner))
 	case modeCommitMsg:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.commitMsgView(inner), inner))
+	case modeSessionSearch:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.sessionSearchView(inner))
 	case modeDiff:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
 	case modeStats:

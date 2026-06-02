@@ -100,6 +100,39 @@ func demoRepos() []repo.Repo {
 }
 
 // demoLangs maps each demo repo path to its (authentic) language Stat.
+func demoAgo(d time.Duration) time.Time { return time.Now().Add(-d) }
+
+func demoSessionHits(query string) []claude.SessionHit {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil
+	}
+	all := []claude.SessionHit{
+		{RepoName: "payments-api", RepoPath: "/orchard-demo/payments-api", ID: "a1b2c3d4e5f6", Title: "Add idempotency keys to charges", Snippet: "…store the Idempotency-Key header and short-circuit duplicate charge attempts so retries are safe…", Modified: demoAgo(26 * time.Hour)},
+		{RepoName: "acme-web", RepoPath: "/orchard-demo/acme-web", ID: "b2c3d4e5f6a1", Title: "Checkout retry safety", Snippet: "…make the payment call idempotent so a retry never double-charges the customer…", Modified: demoAgo(3 * time.Hour)},
+		{RepoName: "gateway", RepoPath: "/orchard-demo/gateway", ID: "c3d4e5f6a1b2", Title: "Dedupe webhook deliveries", Snippet: "…an idempotent handler keyed on the event id, dropping replays…", Modified: demoAgo(8 * 24 * time.Hour)},
+		{RepoName: "auth-service", RepoPath: "/orchard-demo/auth-service", ID: "d4e5f6a1b2c3", Title: "Rotate signing keys", Snippet: "…rotate the JWT signing key without downtime by accepting both during the window…", Modified: demoAgo(40 * time.Hour)},
+	}
+	var out []claude.SessionHit
+	for _, h := range all {
+		if strings.Contains(strings.ToLower(h.Title+" "+h.Snippet+" "+h.RepoName), q) {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func demoInstr() map[string]instrState {
+	return map[string]instrState{
+		"/orchard-demo/acme-web":       {hasClaude: true, hasAgents: true, imports: true}, // wired
+		"/orchard-demo/payments-api":   {hasClaude: true},                                 // claude only
+		"/orchard-demo/auth-service":   {hasAgents: true},                                 // needs wiring
+		"/orchard-demo/gateway":        {hasClaude: true, hasAgents: true},                // has both, not imported
+		"/orchard-demo/billing-worker": {hasAgents: true},                                 // needs wiring
+		"/orchard-demo/cli-tools":      {},                                                // no instructions at all
+	}
+}
+
 func demoLangs() map[string]lang.Stat {
 	out := map[string]lang.Stat{}
 	for _, s := range demoSpecs() {

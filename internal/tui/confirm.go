@@ -15,7 +15,24 @@ type confirmKind int
 const (
 	confirmClaude confirmKind = iota
 	confirmBrowser
+	confirmWire
 )
+
+// requestWire wires AGENTS.md into a new CLAUDE.md for the targets that can be
+// safely fixed (have AGENTS.md, no CLAUDE.md yet), after confirmation.
+func (m model) requestWire(targets []repo.Repo) (tea.Model, tea.Cmd) {
+	var need []repo.Repo
+	for _, r := range targets {
+		if m.instructionsByPath[r.Path].canWire() {
+			need = append(need, r)
+		}
+	}
+	if len(need) == 0 {
+		m.status = "no selected repos can be wired (need AGENTS.md and no CLAUDE.md)"
+		return m, nil
+	}
+	return m.enterConfirm(confirmWire, need)
+}
 
 func (m model) requestClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	if len(targets) <= 1 {
@@ -52,7 +69,7 @@ func (m model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "n", "q":
-		m.mode = modeList
+		m.mode = m.returnMode
 		m.confirmRepos = nil
 		m.status = "cancelled"
 		return m, nil
@@ -63,7 +80,7 @@ func (m model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.runConfirm()
 	case "enter":
 		if !m.confirmYes {
-			m.mode = modeList
+			m.mode = m.returnMode
 			m.confirmRepos = nil
 			m.status = "cancelled"
 			return m, nil
@@ -73,14 +90,18 @@ func (m model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// runConfirm dispatches the pending action and returns to the list.
+// runConfirm dispatches the pending action and returns to wherever the modal
+// was opened from (list, or the detail view).
 func (m model) runConfirm() (tea.Model, tea.Cmd) {
-	m.mode = modeList
+	m.mode = m.returnMode
 	kind, targets := m.confirmKind, m.confirmRepos
 	m.confirmRepos = nil
 	switch kind {
 	case confirmBrowser:
 		return m.openBrowserAll(targets)
+	case confirmWire:
+		m.status = fmt.Sprintf("wiring %d repos", len(targets))
+		return m, wireInstrCmd(targets)
 	default:
 		return m.openClaude(targets)
 	}
@@ -110,6 +131,10 @@ func (m model) confirmView(width int) string {
 	if m.confirmKind == confirmBrowser {
 		title, glyph, glyphColor = iconRemote+" Open in browser", iconRemote, blue
 		promptLines = []string{fmt.Sprintf("Open these %d repos in", n), "separate browser tabs?"}
+	}
+	if m.confirmKind == confirmWire {
+		title, glyph, glyphColor = iconCommit+" Wire AGENTS.md", iconCommit, claudeC
+		promptLines = []string{"Create a CLAUDE.md (@AGENTS.md) in", fmt.Sprintf("these %d repos so Claude reads it?", n)}
 	}
 
 	// Yes / No buttons - the active one is filled, defaulting to Yes.
