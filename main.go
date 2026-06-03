@@ -45,10 +45,11 @@ func main() {
 }
 
 func run(args []string) error {
+	resolved := update.Current(version)
 	// version is handled before config so it always works, even without a config.
 	for _, a := range args {
 		if a == "version" || a == "--version" {
-			fmt.Println("orchard", version)
+			fmt.Println("orchard", resolved)
 			return nil
 		}
 	}
@@ -63,7 +64,7 @@ func run(args []string) error {
 	}
 
 	if len(args) == 0 {
-		return tui.Run(cfg.Root, cfg.Concurrency, version)
+		return tui.Run(cfg.Root, cfg.Concurrency, resolved)
 	}
 
 	// A bare launch with flags (e.g. `orchard --root PATH`) has no subcommand;
@@ -77,7 +78,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return tui.Run(root, concurrency, version)
+		return tui.Run(root, concurrency, resolved)
 	}
 
 	switch args[0] {
