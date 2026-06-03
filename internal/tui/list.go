@@ -7,6 +7,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
+	"github.com/prakashkurup/orchard/internal/update"
 	"strings"
 	"time"
 )
@@ -215,7 +216,11 @@ func (m *model) syncRows() {
 }
 
 func (m model) headerView(width int) string {
-	top := m.wordmark()
+	top := m.wordmark() + subtleStyle.Render(" "+update.Current(m.version))
+	if m.updateTag != "" {
+		top += lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Background(lipgloss.Color(bg)).Bold(true).
+			Render("  ▲ " + m.updateTag + " available · run: orchard update")
+	}
 
 	avail := max(10, width-lipgloss.Width(top)-1)
 	var statusStyled string
@@ -227,9 +232,6 @@ func (m model) headerView(width int) string {
 			Render(fit(m.spinnerOrSync()+" "+m.status, avail))
 	case m.status != "":
 		statusStyled = statusStyle.Render(fit(m.status, avail))
-	case m.updateTag != "":
-		statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color(yellow)).Background(lipgloss.Color(bg)).Bold(true).
-			Render(fit("▲ "+m.updateTag+" available · run: orchard update", avail))
 	}
 	gap := max(1, width-lipgloss.Width(top)-lipgloss.Width(statusStyled))
 	topLine := top + fillLine("", gap, bg) + statusStyled

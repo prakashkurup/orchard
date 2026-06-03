@@ -150,6 +150,18 @@ func TestClaudePanelRowsDoNotWrap(t *testing.T) {
 	}
 }
 
+func TestUpdateBannerVisibleWithStatus(t *testing.T) {
+	m := newModel("root", 4)
+	m.width, m.height = 130, 30
+	m.resize()
+	m.status = "scanned 23 repos"
+	m.updateTag = "v0.6.2"
+	out := ansiPattern.ReplaceAllString(m.headerView(m.innerWidth()), "")
+	if !strings.Contains(out, "v0.6.2 available") {
+		t.Fatalf("update banner must stay visible even when a status is set\n%s", out)
+	}
+}
+
 func TestDetailLoadingFillsWidth(t *testing.T) {
 	m := newModel("root", 4)
 	m.width, m.height = 100, 20

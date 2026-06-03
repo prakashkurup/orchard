@@ -5,6 +5,10 @@ PKG := ./...
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
+# Install location. Defaults to ~/.local/bin (already on PATH for most setups).
+# Override for a different dir, e.g. `make install PREFIX=/usr/local/bin`.
+PREFIX ?= $(HOME)/.local/bin
+
 .DEFAULT_GOAL := build
 
 ## build: compile the orchard binary into ./orchard
@@ -12,10 +16,12 @@ LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
 
-## install: install orchard into $(go env GOPATH)/bin
+## install: build with the version baked in and install into $(PREFIX) (default ~/.local/bin)
 .PHONY: install
 install:
-	go install $(LDFLAGS) .
+	@mkdir -p $(PREFIX)
+	go build $(LDFLAGS) -o $(PREFIX)/$(BINARY) .
+	@echo "installed $(PREFIX)/$(BINARY) ($(VERSION))"
 
 ## run: build and start the TUI
 .PHONY: run
