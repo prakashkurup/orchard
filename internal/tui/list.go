@@ -81,10 +81,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detailVP.GotoTop()
 		return m, worklogCmd(m.repos, m.worklogWindow)
 	case "?":
-		m.mode = modeHelp
-		m.detailVP.SetContent(m.helpBody(m.detailVP.Width))
-		m.detailVP.GotoTop()
-		return m, nil
+		return m.openHelp()
 	case "/":
 		m.filtering = true
 		m.filterInput.SetValue(m.filterText)
@@ -148,6 +145,10 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if r, ok := m.currentRepo(); ok {
 			return m.openDiff(r)
+		}
+	case "v":
+		if r, ok := m.currentRepo(); ok {
+			return m.openPreview(r)
 		}
 	case "T":
 		return m.openStats()
@@ -287,7 +288,7 @@ func (m model) metricsView(width int) string {
 	stats := countStates(m.repos)
 	gap := seg(muted, "    ")
 	cards := strings.Join([]string{
-		metric(iconFolder, "REPOS", len(m.repos), blue),
+		metric(iconFolder, "REPOS", m.shownRepoCount(), blue),
 		metric(iconCheck, "CLEAN", stats.clean, green),
 		metric(iconWarn, "DIRTY", stats.dirty, yellow),
 		metric(iconArrowDn, "BEHIND", stats.behind, red),
@@ -394,7 +395,7 @@ func (m model) footerView(width int) string {
 		}
 		opts = append(opts,
 			cmdHint("p", "pull"), cmdHint("/", "filter"), cmdHint("tab", "quick filter"),
-			cmdHint("space", "select"), cmdHint("s", "sort"), cmdHint("d", "diff"),
+			cmdHint("space", "select"), cmdHint("s", "sort"), cmdHint("d", "diff"), cmdHint("v", "docs"),
 			cmdHint("S", "search"), cmdHint("R", "find sessions"), cmdHint("T", "stats"), cmdHint("L", "worklog"),
 		)
 		line = fillLine(packHints(width, opts, []string{cmdHint("?", "help"), cmdHint("q", "quit")}), width, bg)
@@ -407,30 +408,58 @@ func cmdHint(keyName, label string) string {
 	return subtleStyle.Render("[") + key.Render(keyName) + subtleStyle.Render("] "+label+"   ")
 }
 
+// moreHint is the dim "+N more" marker packHints inserts when commands are
+// hidden, so the dropped keys stay discoverable (the full keymap lives in ?).
+func moreHint(n int) string {
+	return subtleStyle.Render(fmt.Sprintf("+%d more   ", n))
+}
+
 // packHints includes opts in order while they fit, then always appends tail
 // (e.g. ? help · q quit), so the most important keys stay visible at any width.
+// When some opts do not fit, a dim "+N more" marker is inserted before the tail
+// pointing at ? help, so nothing is silently dropped.
 func packHints(width int, opts, tail []string) string {
 	t := strings.Join(tail, "")
 	budget := width - lipgloss.Width(t)
 	if budget < 0 {
 		budget = 0
 	}
-	var b strings.Builder
-	for _, h := range opts {
-		if lipgloss.Width(b.String())+lipgloss.Width(h) > budget {
-			break
+	fit := func(budget int) (string, int) {
+		var b strings.Builder
+		n := 0
+		for _, h := range opts {
+			if lipgloss.Width(b.String())+lipgloss.Width(h) > budget {
+				break
+			}
+			b.WriteString(h)
+			n++
 		}
-		b.WriteString(h)
+		return b.String(), n
 	}
-	b.WriteString(t)
-	return b.String()
+	packed, n := fit(budget)
+	if n == len(opts) {
+		return packed + t
+	}
+	// Reserve room for the marker, then re-pack so it never overruns the width.
+	marker := moreHint(len(opts) - n)
+	packed, n = fit(budget - lipgloss.Width(marker))
+	return packed + moreHint(len(opts)-n) + t
 }
 
 func (m model) renderGrid(width int) string {
 	layout := gridLayout(width)
 	lines := make([]string, 0, len(m.view))
 	rowIdx := 0
+	// during the one-time launch cascade, only the top N lines have appeared yet
+	revealed := len(m.view)
+	if m.revealActive {
+		revealed = m.revealFrame / revealPerRow
+	}
 	for vi, it := range m.view {
+		if vi >= revealed {
+			lines = append(lines, fillLine("", width, bg)) // not yet cascaded in
+			continue
+		}
 		if it.header {
 			lines = append(lines, groupHeaderLine(it.group, it.count, width))
 			continue
@@ -439,7 +468,7 @@ func (m model) renderGrid(width int) string {
 		current := vi == m.cursor
 		alt := rowIdx%2 == 1
 		pulling := m.pulling[r.Path]
-		lines = append(lines, renderRow(r, m.selected[r.Path], current, alt, pulling, m.spinner.View(), m.newByPath[r.Path], m.langByPath[r.Path], m.ghStatus[r.Path].CIState == "failing", layout))
+		lines = append(lines, renderRow(r, m.selected[r.Path], current, alt, pulling, m.spinner.View(), m.newByPath[r.Path], m.langByPath[r.Path], m.ghStatus[r.Path].CIState == "failing", m.pulses[r.Path], layout))
 		rowIdx++
 	}
 	return strings.Join(lines, "\n")
@@ -462,12 +491,12 @@ func renderRows(repos []repo.Repo, selected map[string]bool, cursor, width int) 
 	layout := gridLayout(width)
 	lines := make([]string, 0, len(repos))
 	for i, r := range repos {
-		lines = append(lines, renderRow(r, selected[r.Path], i == cursor, i%2 == 1, false, "", 0, lang.Stat{}, false, layout))
+		lines = append(lines, renderRow(r, selected[r.Path], i == cursor, i%2 == 1, false, "", 0, lang.Stat{}, false, 0, layout))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, newCount int, lng lang.Stat, ghFailing bool, layout gridColumns) string {
+func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, newCount int, lng lang.Stat, ghFailing bool, pulse int, layout gridColumns) string {
 	info := r.LastCommit
 	if r.SkipReason != "" {
 		info = r.SkipReason
@@ -491,6 +520,13 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 		}
 		stColor = accent
 		info = "pulling…"
+	} else if pulse > 0 {
+		// just tended: the status glyph blossoms through the orchard palette, then
+		// settles back to its normal clean mark as the pulse decays.
+		bloomCols := []string{green, teal, accent, yellow, brand}
+		f := pulseFrames - pulse
+		stText = string(introPetals[f%len(introPetals)])
+		stColor = bloomCols[f%len(bloomCols)]
 	}
 
 	syncedText := relTime(r.LastFetched)

@@ -135,19 +135,14 @@ func repoMatches(r repo.Repo, q string) bool {
 	}
 }
 
-// scrollActive scrolls whatever view is in front by delta rows (negative = up),
-// so the mouse wheel works everywhere, not just the dashboard.
+// scrollActive scrolls whatever cursor-based view is in front by delta rows
+// (negative = up), so the mouse wheel works everywhere. The detail-viewport
+// pagers are eased separately via easeScrollBy.
 func (m *model) scrollActive(delta int) {
 	switch m.mode {
 	case modeList:
 		m.moveCursor(delta)
 		m.syncRows()
-	case modeDetail, modeDiff, modeStats, modeHelp, modeWorklog:
-		if delta < 0 {
-			m.detailVP.ScrollUp(-delta)
-		} else {
-			m.detailVP.ScrollDown(delta)
-		}
 	case modeSearch:
 		if len(m.searchFlat) > 0 {
 			m.searchCursor = clamp(m.searchCursor+delta, 0, len(m.searchFlat)-1)
@@ -186,7 +181,7 @@ func (m *model) clickToRow(y int) {
 	}
 	m.cursor = idx
 	m.ensureCursorVisible()
-	m.toggleCurrent() // a click selects/deselects the repo
+	m.toggleCurrent()
 }
 
 func (m *model) normalizeCursor() {

@@ -71,18 +71,6 @@ func (m model) handleDiffKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setDetailContent() // the diff reused detailVP; restore the detail body
 		}
 		return m, nil
-	case "up", "k":
-		m.detailVP.ScrollUp(1)
-	case "down", "j":
-		m.detailVP.ScrollDown(1)
-	case "pgup":
-		m.detailVP.ScrollUp(m.detailVP.Height)
-	case "pgdown":
-		m.detailVP.ScrollDown(m.detailVP.Height)
-	case "g", "home":
-		m.detailVP.GotoTop()
-	case "G", "end":
-		m.detailVP.GotoBottom()
 	}
 	return m, nil
 }

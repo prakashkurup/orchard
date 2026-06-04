@@ -295,6 +295,36 @@ func Pull(ctx context.Context, seed repo.Repo) PullResult {
 	return PullResult{Repo: updated, Status: StatusPulled}
 }
 
+// FetchAllQuiet updates every repo's remote-tracking refs best-effort, ignoring
+// per-repo errors (e.g. network or auth). It only touches refs, never the
+// working tree, so a background refresh can keep ahead/behind counts current.
+func FetchAllQuiet(ctx context.Context, repos []repo.Repo, concurrency int) {
+	if concurrency <= 0 {
+		concurrency = DefaultConcurrency
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for _, r := range repos {
+		if r.Path == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			fctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+			defer cancel()
+			_, _ = runGit(fctx, path, "fetch", "--quiet")
+		}(r.Path)
+	}
+	wg.Wait()
+}
+
 // PullRepos pulls every repo concurrently and returns the results in order.
 func PullRepos(ctx context.Context, repos []repo.Repo, concurrency int) []PullResult {
 	if concurrency <= 0 {

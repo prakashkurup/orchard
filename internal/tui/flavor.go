@@ -246,6 +246,19 @@ func idleSeconds() int {
 	return 600
 }
 
+// fetchIntervalSecs is how often the dashboard fetches remotes in the background
+// while live refresh is on, from ORCHARD_FETCH_SECS (default 300 = 5 minutes).
+// 0 or negative disables background fetching (live refresh still re-reads local
+// git state every refreshInterval; you can always fetch on demand with f / F).
+func fetchIntervalSecs() int {
+	if v := os.Getenv("ORCHARD_FETCH_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 300
+}
+
 // screensaverView renders one frame of the idle animation: petals falling down
 // a dark field, with a faint centered hint. Every cell is painted on the app
 // background so there is no banding.

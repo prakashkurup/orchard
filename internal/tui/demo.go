@@ -268,6 +268,14 @@ func demoTouched() []claude.TouchedFile {
 	}
 }
 
+// demoDoc returns sample markdown for the preview pager in demo mode.
+func demoDoc(name string) string {
+	if name == "README.md" {
+		return "# acme-web\n\nThe storefront and checkout for Acme.\n\n## Stack\n\n- TypeScript + React\n- Vite, Vitest\n\n## Develop\n\n```sh\nnpm install\nnpm run dev\n```\n\nSee `CLAUDE.md` for agent instructions.\n"
+	}
+	return "# acme-web - agent instructions\n\n> Context Claude Code loads when it runs in this repo.\n\n## Build and test\n\n- `npm run dev` - start the dev server\n- `npm test` - run Vitest\n- `npm run lint` - eslint + prettier\n\n## Conventions\n\n- **No `any`** in new code; prefer discriminated unions.\n- Components are function components with hooks.\n- Money is cents (integers), never floats.\n\n## Watch out\n\n1. `SummaryCard` is shared by checkout and the review step.\n2. The promo-code path must stay idempotent.\n"
+}
+
 // demoDetailLangs returns the language breakdown shown in a demo repo's detail
 // view (a single dominant language at 100%).
 func demoDetailLangs(path string) []lang.Stat {

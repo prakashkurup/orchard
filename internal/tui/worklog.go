@@ -70,14 +70,6 @@ func (m model) handleWorklogKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeList
 		m.status = ""
 		return m, nil
-	case "up", "k":
-		m.detailVP.ScrollUp(1)
-	case "down", "j":
-		m.detailVP.ScrollDown(1)
-	case "pgup":
-		m.detailVP.ScrollUp(m.detailVP.Height)
-	case "pgdown":
-		m.detailVP.ScrollDown(m.detailVP.Height)
 	case "1":
 		return reload(m, "1 day ago")
 	case "2":

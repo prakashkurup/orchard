@@ -6,21 +6,26 @@ import (
 	"strings"
 )
 
+// openHelp shows the full keymap, remembering the screen it was opened from so
+// esc returns there (the dashboard, or the detail page when opened from it).
+func (m model) openHelp() (tea.Model, tea.Cmd) {
+	m.returnMode = m.mode
+	m.mode = modeHelp
+	m.detailVP.SetContent(m.helpBody(m.detailVP.Width))
+	m.detailVP.GotoTop()
+	return m, nil
+}
+
 func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "q", "?", "enter":
-		m.mode = modeList
+		m.mode = m.returnMode
+		if m.mode == modeDetail {
+			m.setDetailContent() // the keymap reused detailVP; restore the detail body
+		}
 		return m, nil
-	case "up", "k":
-		m.detailVP.ScrollUp(1)
-	case "down", "j":
-		m.detailVP.ScrollDown(1)
-	case "pgup":
-		m.detailVP.ScrollUp(m.detailVP.Height)
-	case "pgdown":
-		m.detailVP.ScrollDown(m.detailVP.Height)
 	}
 	return m, nil
 }
@@ -78,12 +83,13 @@ func (m model) helpBody(width int) string {
 			{"p / P", "pull selected / all (ff-only)"},
 			{"f / F", "fetch selected / all"},
 			{"b", "switch branch"},
-			{"r / w", "refresh now / toggle live refresh"},
+			{"r / w", "refresh now / toggle live refresh (also fetches remotes in the background)"},
 		}},
 		{"CLAUDE CODE", [][2]string{
 			{"c / C", "launch / resume last session"},
 			{"H", "browse and resume past sessions"},
 			{"f", "files Claude touched (detail page; open / diff them)"},
+			{"v", "preview CLAUDE.md / AGENTS.md / README (detail page)"},
 			{"A", "one session across selected repos (2+)"},
 			{"M", "draft a commit message in a window"},
 			{"I", "wire AGENTS.md into a new CLAUDE.md (selected)"},

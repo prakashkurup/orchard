@@ -46,14 +46,6 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail = nil
 		m.status = ""
 		return m, nil
-	case "up", "k":
-		m.detailVP.ScrollUp(1)
-	case "down", "j":
-		m.detailVP.ScrollDown(1)
-	case "pgup":
-		m.detailVP.ScrollUp(m.detailVP.Height)
-	case "pgdown":
-		m.detailVP.ScrollDown(m.detailVP.Height)
 	case "p":
 		r := m.repoByPath(m.detailRepo)
 		m.mode = modeList
@@ -74,6 +66,8 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openSessions(m.repoByPath(m.detailRepo))
 	case "f":
 		return m.openTouched(m.repoByPath(m.detailRepo))
+	case "v":
+		return m.openPreview(m.repoByPath(m.detailRepo))
 	case "M":
 		return m.openCommitMessage(m.repoByPath(m.detailRepo))
 	case "I":
@@ -86,6 +80,8 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openEditor(m.repoByPath(m.detailRepo), false)
 	case "E":
 		return m.openEditor(m.repoByPath(m.detailRepo), true)
+	case "?":
+		return m.openHelp()
 	}
 	return m, nil
 }
@@ -608,20 +604,15 @@ func (m model) detailView(width int) string {
 	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(stateChip))
 	topLine := fillLine(left+fillLine("", gap, bg)+stateChip, width, bg)
 	rule := hrule(width)
-	full := []string{
+	// Pack as many hints as fit, in priority order, so commands are never dropped
+	// wholesale and newly added keys stay visible. esc/scroll lead; least-used trail.
+	hints := fillLine(packHints(width, []string{
 		cmdHint("esc", "back"), cmdHint("↑↓", "scroll"),
-		cmdHint("c", "claude"), cmdHint("C", "resume"), cmdHint("H", "sessions"), cmdHint("f", "files"),
-		cmdHint("M", "commit msg"), cmdHint("I", "wire md"), cmdHint("d", "diff"), cmdHint("b", "branch"),
+		cmdHint("c", "claude"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
+		cmdHint("f", "files"), cmdHint("v", "docs"), cmdHint("d", "diff"),
+		cmdHint("M", "commit msg"), cmdHint("I", "wire md"), cmdHint("b", "branch"),
 		cmdHint("p", "pull"), cmdHint("e", "editor"), cmdHint("O", "browser"), cmdHint("y", "copy path"),
-	}
-	joined := strings.Join(full, "")
-	if lipgloss.Width(joined) > width {
-		joined = strings.Join([]string{
-			cmdHint("esc", "back"), cmdHint("c", "claude"), cmdHint("d", "diff"), cmdHint("y", "copy path"),
-			cmdHint("M", "commit msg"), cmdHint("b", "branch"),
-		}, "")
-	}
-	hints := fillLine(joined, width, bg)
+	}, []string{cmdHint("?", "help")}), width, bg)
 
 	rows := []string{
 		topLine,

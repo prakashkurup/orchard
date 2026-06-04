@@ -42,6 +42,7 @@ const (
 	modeSessionSearch
 	modePresets
 	modeTouched
+	modePreview
 )
 
 type sortMode int
@@ -180,6 +181,11 @@ type model struct {
 	touchedLoading bool
 	touchedReturn  uiMode // where esc returns (own field, since opening a diff reuses returnMode)
 
+	previewRepo  repo.Repo // repo whose markdown docs are previewed
+	previewDocs  []string  // the md files that exist (CLAUDE.md / AGENTS.md / README.md)
+	previewIdx   int       // which doc is shown
+	previewBytes int       // size of the shown doc, for the est-tokens readout
+
 	returnMode uiMode // where a modal returns to on close (list, or detail if opened there)
 
 	statsLoading bool           // the stats heatmaps are still computing
@@ -210,6 +216,7 @@ type model struct {
 	searchRunning bool
 
 	autoRefresh bool
+	bgFetching  bool // a background fetch is in flight (avoids overlapping fetches)
 
 	worklogWindow string // git --since value, e.g. "1 day ago"
 	worklogText   string // plain-text digest for clipboard copy
@@ -221,6 +228,20 @@ type model struct {
 
 	konami      []string // recent arrow keys, for the bloom easter egg
 	bloomFrames int      // remaining frames of the bloom animation
+
+	// one-shot spring animations (harmonica). The 60fps ticker runs only while
+	// something is actually moving, then stops, so the idle dashboard is still.
+	animOn     bool
+	introShown bool           // the launch intro has played (once per process)
+	intro      *introState    // non-nil while the launch intro is on screen
+	repoCount  spring1d       // animated REPOS metric (counts up after a scan)
+	pulses     map[string]int // repo path -> remaining frames of a "just tended" pulse
+
+	// one-time top-to-bottom row reveal when the dashboard first appears
+	revealActive bool
+	revealFrame  int
+	revealLines  int
+	revealed     bool // guard: the cascade only ever plays once per process
 
 	idle      int  // idle-probe ticks since the last input (≈ seconds awake)
 	idleAfter int  // seconds of idle before the screensaver wakes (0 = disabled)
@@ -277,6 +298,12 @@ type claudeStatsMsg struct {
 }
 
 type tickMsg time.Time
+
+// fetchTickMsg fires the background-fetch cadence (while live refresh is on).
+type fetchTickMsg time.Time
+
+// bgFetchMsg carries the repos after a background fetch + rescan.
+type bgFetchMsg struct{ repos []repo.Repo }
 
 // idleTickMsg drives idle detection and the screensaver; gen is matched against
 // the model's current idleGen so superseded ticks are ignored.
@@ -526,6 +553,8 @@ func newModel(root string, concurrency int) model {
 		pulling:            map[string]bool{},
 		newByPath:          map[string]int{},
 		langByPath:         map[string]lang.Stat{},
+		pulses:             map[string]int{},
+		repoCount:          newSpring1d(7.0, 1.0), // counts up, no overshoot
 		editorID:           editor.DefaultID(),
 		sortMode:           sortName, // launch sorted by name (not the sortAttention zero value)
 		autoRefresh:        true,
@@ -552,7 +581,7 @@ func displayRoot(root string) string {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), idleTickCmd(idleProbe, m.idleGen), updateCheckCmd(m.version))
+	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), fetchTickCmd(), idleTickCmd(idleProbe, m.idleGen), updateCheckCmd(m.version))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -561,6 +590,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+		// First real size: the orchard grows in once before the dashboard appears.
+		if !m.introShown && animEnabled() && m.width >= 40 && m.height >= 10 {
+			m.introShown = true
+			m.intro = newIntro(m.innerWidth(), max(1, m.height-2))
+			return m, m.startAnim()
+		}
 		return m, nil
 
 	case scanMsg:
@@ -575,9 +610,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("scanned %d repos", len(msg.repos))
 		m.claudeUsage = nil // recompute the pinned usage panel
 		m.syncRows()
+		// Count the REPOS metric up; while the intro plays it defers to intro-end.
+		var countCmd tea.Cmd
+		if m.intro == nil {
+			m.beginCountUp()
+			m.beginReveal()
+			countCmd = m.startAnim()
+		}
 		// recompute languages on every manual scan (startup / refresh / after
 		// clone) so newly-added repos get their language; claude usage too.
-		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos)}
+		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos), countCmd}
 		if !m.seenChecked { // "since last visit" baseline: once per launch only
 			m.seenChecked = true
 			cmds = append(cmds, newCommitsCmd(m.repos))
@@ -615,9 +657,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pullOneMsg:
 		m.applyOneResult(msg.result)
 		delete(m.pulling, msg.result.Repo.Path)
+		var pulseCmd tea.Cmd
 		switch msg.result.Status {
 		case orchardgit.StatusPulled:
 			m.pullDone++
+			pulseCmd = m.pulse(msg.result.Repo.Path) // the repo blossoms: just tended
 		case orchardgit.StatusSkipped:
 			m.pullSkip++
 		case orchardgit.StatusFailed:
@@ -628,7 +672,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("pull complete: %d pulled · %d skipped · %d failed", m.pullDone, m.pullSkip, m.pullFail)
 		}
 		m.syncRows()
-		return m, nil
+		return m, pulseCmd
 
 	case fetchOneMsg:
 		for i, r := range m.repos {
@@ -662,6 +706,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tickCmd()
 
+	case fetchTickMsg:
+		// Background fetch only while live refresh is on and the dashboard is idle,
+		// and never while one is already running, so ahead/behind go live without
+		// hammering the network. Always re-arm the (slow) ticker.
+		if m.autoRefresh && !m.loading && !m.bgFetching && m.mode == modeList && len(m.pulling) == 0 && !demoMode() && len(m.repos) > 0 {
+			m.bgFetching = true
+			return m, tea.Batch(fetchTickCmd(), bgFetchCmd(m.root, m.repos, m.concurrency))
+		}
+		return m, fetchTickCmd()
+
+	case bgFetchMsg:
+		m.bgFetching = false
+		if len(msg.repos) > 0 {
+			m.repos = msg.repos
+			m.dropMissingSelections()
+			m.syncRows()
+		}
+		return m, nil
+
 	case bloomTickMsg:
 		if m.bloomFrames > 0 {
 			m.bloomFrames--
@@ -669,6 +732,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.bloomFrames > 0 {
 			return m, bloomTickCmd()
 		}
+		return m, nil
+
+	case animTickMsg:
+		if m.stepAnims() {
+			return m, animTick()
+		}
+		m.animOn = false
 		return m, nil
 
 	case commitTickMsg:
@@ -743,8 +813,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
+			if usesDetailVP(m.mode) {
+				m.detailVP.ScrollUp(2)
+				return m, nil
+			}
 			m.scrollActive(-1)
 		case tea.MouseButtonWheelDown:
+			if usesDetailVP(m.mode) {
+				m.detailVP.ScrollDown(2)
+				return m, nil
+			}
 			m.scrollActive(1)
 		case tea.MouseButtonLeft:
 			if m.mode == modeList && msg.Action == tea.MouseActionPress {
@@ -902,6 +980,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil // nothing loading: let the tick chain stop
 
 	case tea.KeyMsg:
+		// Any key skips the launch intro (ctrl+c still quits), then reveals the
+		// dashboard with the count-up.
+		if m.intro != nil {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			m.intro = nil
+			m.beginCountUp()
+			return m, m.startAnim()
+		}
 		// Any key wakes the screensaver (and is consumed doing so) and resets idle.
 		if m.ssActive {
 			m.ssActive, m.idle = false, 0
@@ -909,8 +997,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, idleTickCmd(idleProbe, m.idleGen)
 		}
 		m.idle = 0
+		if m.revealActive { // any key completes the row cascade instantly
+			m.revealActive = false
+			m.syncRows()
+		}
 		if m.filtering {
 			return m.handleFilterKey(msg)
+		}
+		// Scrolling the shared detail viewport is handled from one place (instant,
+		// not eased), so every pager (detail, diff, stats, help, worklog, docs)
+		// behaves identically and g/G work everywhere.
+		if usesDetailVP(m.mode) {
+			switch msg.String() {
+			case "up", "k":
+				m.detailVP.ScrollUp(1)
+				return m, nil
+			case "down", "j":
+				m.detailVP.ScrollDown(1)
+				return m, nil
+			case "pgup":
+				m.detailVP.ScrollUp(max(1, m.detailVP.Height))
+				return m, nil
+			case "pgdown":
+				m.detailVP.ScrollDown(max(1, m.detailVP.Height))
+				return m, nil
+			case "g", "home":
+				m.detailVP.GotoTop()
+				return m, nil
+			case "G", "end":
+				m.detailVP.GotoBottom()
+				return m, nil
+			}
 		}
 		switch m.mode {
 		case modeHelp:
@@ -937,6 +1054,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handlePresetsKey(msg)
 		case modeTouched:
 			return m.handleTouchedKey(msg)
+		case modePreview:
+			return m.handlePreviewKey(msg)
 		case modeSearch:
 			return m.handleSearchKey(msg)
 		case modeDetail:
@@ -979,6 +1098,9 @@ func (m *model) resize() {
 	if m.mode == modeDiff {
 		m.detailVP.SetContent(colorizeDiff(m.diffText, m.detailVP.Width))
 	}
+	if m.mode == modePreview {
+		m.setPreviewContent()
+	}
 	if m.mode == modeStats {
 		m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
 	}
@@ -993,6 +1115,9 @@ func (m model) innerWidth() int {
 
 func (m model) View() string {
 	inner := m.innerWidth()
+	if m.intro != nil {
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.intro.view(inner, max(1, m.height-2)))
+	}
 	switch m.mode {
 	case modeDetail:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.detailView(inner))
@@ -1010,6 +1135,8 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.presetsView(inner), inner))
 	case modeTouched:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.touchedView(inner), inner))
+	case modePreview:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.previewView(inner))
 	case modeDiff:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
 	case modeStats:

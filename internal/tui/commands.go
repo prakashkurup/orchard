@@ -25,6 +25,32 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// fetchTickCmd drives the background fetch cadence (slower than the local
+// refresh). Returns nil when background fetching is disabled, so the ticker
+// simply stops.
+func fetchTickCmd() tea.Cmd {
+	secs := fetchIntervalSecs()
+	if secs <= 0 {
+		return nil
+	}
+	return tea.Tick(time.Duration(secs)*time.Second, func(t time.Time) tea.Msg { return fetchTickMsg(t) })
+}
+
+// bgFetchCmd fetches every repo's remotes quietly in the background, then
+// re-scans so ahead/behind reflect the live remote. Errors are swallowed.
+func bgFetchCmd(root string, repos []repo.Repo, concurrency int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		orchardgit.FetchAllQuiet(ctx, repos, concurrency)
+		updated, err := orchardgit.Scan(ctx, root, concurrency)
+		if err != nil {
+			return bgFetchMsg{}
+		}
+		return bgFetchMsg{repos: updated}
+	}
+}
+
 // idleTickCmd drives idle detection and the screensaver animation. The gen token
 // lets a fresh tick supersede any in-flight one (e.g. when cadence changes) so we
 // never run two overlapping tickers.
