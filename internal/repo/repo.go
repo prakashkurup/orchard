@@ -133,6 +133,11 @@ func (r Repo) WithDisplay() Repo {
 }
 
 func (r Repo) PullSkipReason() string {
+	// A clean branch with an upstream is always safe to pull: pull is --ff-only,
+	// so it can only advance (git rejects a non-fast-forward, surfaced as failed).
+	// We deliberately do NOT skip non-default branches here: if you are sitting on
+	// a branch that tracks its remote (e.g. a trunk like "main" when the repo's
+	// recorded default is still "master"), pressing pull should fast-forward it.
 	switch {
 	case r.Err != "":
 		return "status error: " + r.Err
@@ -140,8 +145,6 @@ func (r Repo) PullSkipReason() string {
 		return "detached HEAD"
 	case r.Dirty:
 		return "working tree is dirty"
-	case r.DefaultBranch != "" && !r.OnDefault:
-		return "on non-default branch " + r.Branch
 	case !r.HasUpstream:
 		return "no upstream configured"
 	default:

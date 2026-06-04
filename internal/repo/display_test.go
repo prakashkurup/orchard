@@ -61,9 +61,13 @@ func TestPullSkipReason(t *testing.T) {
 	}{
 		{Repo{Dirty: true}, "dirty"},
 		{Repo{Detached: true}, "detached"},
-		{Repo{Branch: "feat", DefaultBranch: "main", OnDefault: false}, "non-default"},
 		{Repo{HasUpstream: false}, "no upstream"},
 		{Repo{Branch: "main", DefaultBranch: "main", OnDefault: true, HasUpstream: true}, ""},
+		// A trunk that is not the repo's recorded default (e.g. "main" while the
+		// remote default is still "master") is still pullable: pull is ff-only.
+		{Repo{Branch: "main", DefaultBranch: "master", OnDefault: false, HasUpstream: true}, ""},
+		// ...but a non-default branch with no upstream has nothing to pull from.
+		{Repo{Branch: "feat", DefaultBranch: "main", OnDefault: false, HasUpstream: false}, "no upstream"},
 	}
 	for _, c := range cases {
 		got := c.r.PullSkipReason()
