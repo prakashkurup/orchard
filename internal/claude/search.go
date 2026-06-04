@@ -8,30 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 )
-
-// SessionHit is a transcript whose content matched a search query.
-type SessionHit struct {
-	RepoName string
-	RepoPath string
-	ID       string
-	Title    string
-	Snippet  string // cleaned text around the first match
-	Modified time.Time
-}
-
-// DisplayTitle is a human label for the hit: its title, else a short session id.
-func (h SessionHit) DisplayTitle() string {
-	if strings.TrimSpace(h.Title) != "" {
-		return h.Title
-	}
-	if len(h.ID) >= 8 {
-		return "session " + h.ID[:8]
-	}
-	return "session"
-}
 
 // SearchSessions scans every transcript for the targets and returns those whose
 // content contains query (case-insensitive), newest first, capped at limit.

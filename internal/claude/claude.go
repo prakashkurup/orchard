@@ -16,30 +16,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/prakashkurup/orchard/internal/agent"
 )
 
-// Session is a single Claude Code transcript.
-type Session struct {
-	ID        string
-	Modified  time.Time
-	Model     string
-	Assistant int    // count of assistant turns
-	Title     string // Claude's "ai-title" summary, or a fallback from the last prompt
-	Tokens    int    // total tokens (input + output + cache) across the session
-}
-
-// DisplayTitle is a human label for the session: its ai-title, else a trimmed
-// last prompt, else a short form of the session id.
-func (s Session) DisplayTitle() string {
-	switch {
-	case strings.TrimSpace(s.Title) != "":
-		return s.Title
-	case len(s.ID) >= 8:
-		return "session " + s.ID[:8]
-	default:
-		return "session"
-	}
-}
+// The provider-neutral data types live in internal/agent; these aliases keep the
+// claude.* names that the rest of the code already uses.
+type (
+	Session     = agent.Session
+	Target      = agent.Target
+	RepoUsage   = agent.RepoUsage
+	Usage       = agent.Usage
+	TouchedFile = agent.TouchedFile
+	SessionHit  = agent.SessionHit
+)
 
 func encode(p string) string {
 	return strings.NewReplacer("/", "-", ".", "-").Replace(p)
@@ -310,33 +300,6 @@ func extract(line, key string) string {
 		return ""
 	}
 	return rest[:j]
-}
-
-// Target identifies a repo for aggregation.
-type Target struct {
-	Name string
-	Path string
-}
-
-// RepoUsage is the Claude Code footprint of a single repo.
-type RepoUsage struct {
-	Name     string
-	Path     string
-	Sessions int
-	Turns    int
-	Tokens   int
-	Last     time.Time
-}
-
-// Usage is the global Claude Code rollup across repos.
-type Usage struct {
-	TotalSessions int
-	TotalTurns    int
-	TotalTokens   int
-	ReposUsed     int
-	Models        map[string]int // pretty model -> assistant turns
-	Repos         []RepoUsage    // sorted by turns desc
-	Last          time.Time
 }
 
 // Aggregate parses every transcript for each target and rolls up totals. It is
