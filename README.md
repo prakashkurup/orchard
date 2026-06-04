@@ -84,7 +84,8 @@ If you juggle many repositories and lean on Claude Code, orchard is the cockpit 
 ## Features
 
 - **One-screen overview** of every repo: branch, clean/dirty/ahead/behind/diverged/detached, uncommitted + stash counts, dominant language, last-synced and last-commit times (color-coded by freshness).
-- **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, non-default branches, and repos with no upstream.
+- **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, and repos with no upstream (a non-fast-forward is reported, never forced).
+- **Preview docs** (`v`) - render a repo's `CLAUDE.md` / `AGENTS.md` / `README.md` in the terminal, with its size and an estimated per-session token cost.
 - **Fetch, branch switch, multi-select** - act on one repo or many at once.
 - **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or **Claude Code** (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
 - **Cross-repo code search** (`S`) that respects `.gitignore`.
@@ -190,6 +191,7 @@ Press `?` in-app for the same keymap and legend.
 | `M` | draft a commit message (Claude Code drafts it in a window to copy / regenerate) |
 | `I` | wire `AGENTS.md` into a new `CLAUDE.md` for the selected repos (so Claude reads it) |
 | `W` | workspace presets: save a repo set, then launch a cross-repo session (`A`) on it |
+| `v` | preview a repo's `CLAUDE.md` / `AGENTS.md` / `README.md`, rendered, with size and est. token cost |
 
 ### Search, stats, and filtering
 
@@ -206,7 +208,7 @@ Press `?` in-app for the same keymap and legend.
 
 | Key | Action |
 |-----|--------|
-| `r` / `w` | refresh now / toggle live auto-refresh |
+| `r` / `w` | refresh now / toggle live auto-refresh (also fetches remotes periodically; tune with `ORCHARD_FETCH_SECS`) |
 | `?` / `q` | help & legend / quit |
 
 ## CLI
@@ -254,6 +256,8 @@ The `orchard config` **command** doesn't change anything: it prints the resolved
 - `ORCHARD_ADDDIR_MEMORY` - set to `0` to stop a cross-repo Claude session (`A`) from loading the added repos' `CLAUDE.md` (on by default).
 - `ORCHARD_NO_UPDATE_CHECK` - set to `1` to disable the daily check for a newer release.
 - `ORCHARD_NO_MOUSE` - set to `1` to disable mouse capture (so your terminal's native text selection works).
+- `ORCHARD_FETCH_SECS` - while live refresh is on, how often (seconds) to fetch remotes in the background so ahead/behind stay current. Default `300` (5 min); `0` disables background fetching (fetch on demand with `f` / `F`).
+- `ORCHARD_NO_ANIM` - set to `1` to turn off motion (the launch intro, the count-up, eased scrolling, and the "just tended" row pulse).
 
 ### Advanced config file
 
