@@ -399,7 +399,7 @@ func Preview(root string, concurrency, width, height int, grouped bool) (string,
 	if err != nil {
 		return "", err
 	}
-	enrichClaude(repos)
+	enrichAgents(repos)
 	m := newModel(root, concurrency)
 	m.width = width
 	m.height = height
@@ -437,7 +437,7 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 		if err != nil {
 			return "", err
 		}
-		enrichClaude(repos)
+		enrichAgents(repos)
 	}
 	m := newModel(root, concurrency)
 	m.width, m.height = width, height

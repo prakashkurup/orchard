@@ -98,6 +98,14 @@ func demoRepos() []repo.Repo {
 				r.CCLast = time.Now().Add(-time.Duration(cc[1]) * time.Hour)
 			}
 		}
+		// Per-repo Codex footprint. payments-api was worked with both agents (so it
+		// shows both marks); data-pipeline is Codex-only.
+		if cx, ok := map[string][2]int{
+			"payments-api": {4, 2}, "data-pipeline": {5, 12},
+		}[s.name]; ok {
+			r.CodexSessions = cx[0]
+			r.CodexLast = time.Now().Add(-time.Duration(cx[1]) * time.Hour)
+		}
 		repos = append(repos, r.WithDisplay())
 	}
 	return repos

@@ -177,10 +177,10 @@ func TestDetailLoadingFillsWidth(t *testing.T) {
 	}
 }
 
-func TestClaudeCellStates(t *testing.T) {
+func TestAgentCellStates(t *testing.T) {
 	now := time.Now()
 	strip := func(r repo.Repo) string {
-		return strings.TrimSpace(ansiPattern.ReplaceAllString(claudeCell(r, 12, bg, false), ""))
+		return strings.TrimSpace(ansiPattern.ReplaceAllString(agentCell(r, 14, bg, false), ""))
 	}
 	cases := []struct {
 		name, want string
@@ -193,11 +193,18 @@ func TestClaudeCellStates(t *testing.T) {
 		{"recent + clean", "2h", repo.Repo{CCSessions: 1, CCLast: now.Add(-2 * time.Hour)}},
 		{"old + dirty", "1d", repo.Repo{CCSessions: 1, CCLast: now.Add(-30 * time.Hour), Dirty: true}},
 		{"future stamp", "live", repo.Repo{CCSessions: 1, CCLast: now.Add(10 * time.Second)}}, // clock skew
+		{"claude mark", claudeMark, repo.Repo{CCSessions: 1, CCLast: now.Add(-2 * time.Hour)}},
+		{"codex only", codexMark, repo.Repo{CodexSessions: 1, CodexLast: now.Add(-2 * time.Hour)}},
 	}
 	for _, c := range cases {
 		if got := strip(c.r); !strings.Contains(got, c.want) {
-			t.Errorf("%s: claudeCell = %q, want contains %q", c.name, got, c.want)
+			t.Errorf("%s: agentCell = %q, want contains %q", c.name, got, c.want)
 		}
+	}
+	// when both agents ran, both marks appear
+	both := strip(repo.Repo{CCSessions: 1, CCLast: now.Add(-3 * time.Hour), CodexSessions: 1, CodexLast: now.Add(-1 * time.Hour)})
+	if !strings.Contains(both, claudeMark) || !strings.Contains(both, codexMark) {
+		t.Errorf("both-ran cell should show both marks: %q", both)
 	}
 	// a live + clean repo must not carry the red bang
 	if got := strip(repo.Repo{CCSessions: 1, CCLast: now.Add(-10 * time.Second)}); strings.Contains(got, "!") {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
@@ -131,7 +132,7 @@ func silentScanCmd(root string, concurrency int) tea.Cmd {
 		if err != nil {
 			return silentScanMsg{}
 		}
-		enrichClaude(repos) // cheap filesystem summary; keeps sort-by-claude accurate
+		enrichAgents(repos) // cheap filesystem summary; keeps sort-by-claude accurate
 		return silentScanMsg{repos: repos}
 	}
 }
@@ -300,18 +301,21 @@ func scanCmd(root string, concurrency int) tea.Cmd {
 		defer cancel()
 		repos, err := orchardgit.Scan(ctx, root, concurrency)
 		if err == nil {
-			enrichClaude(repos)
+			enrichAgents(repos)
 		}
 		return scanMsg{repos: repos, err: err}
 	}
 }
 
-// enrichClaude annotates each repo with its Claude Code session summary (cheap,
-// filesystem-only).
-func enrichClaude(repos []repo.Repo) {
+// enrichAgents annotates each repo with its per-agent (Claude Code and Codex)
+// session summary (cheap, filesystem-only).
+func enrichAgents(repos []repo.Repo) {
 	for i := range repos {
 		n, last := claude.Summary(repos[i].Path)
 		repos[i].CCSessions = n
 		repos[i].CCLast = last
+		cn, clast := codex.Summary(repos[i].Path)
+		repos[i].CodexSessions = cn
+		repos[i].CodexLast = clast
 	}
 }
