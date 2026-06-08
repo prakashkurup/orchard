@@ -4,6 +4,7 @@ import (
 	"fmt"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/prakashkurup/orchard/internal/agentcfg"
 	"github.com/prakashkurup/orchard/internal/claude"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/termlaunch"
@@ -12,6 +13,59 @@ import (
 	"sort"
 	"strings"
 )
+
+// wireGraphMCP registers orchard's code-graph MCP server into configRepo's
+// .mcp.json before a Claude Code launch, serving the graphs of graphRepos (one
+// repo normally; several for a cross-repo `A` session). Best-effort, idempotent,
+// Claude-only; set ORCHARD_GRAPH_MCP=0 to disable.
+func (m model) wireGraphMCP(configRepo string, graphRepos []string) {
+	if len(graphRepos) == 0 || !m.graphWiringEnabled() {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	switch { // best-effort; never block a launch
+	case m.assistantIsClaude():
+		_, _ = agentcfg.EnsureClaudeMCP(configRepo, graphRepos, exe)
+	case m.assistantIsCodex():
+		_, _ = agentcfg.EnsureCodexMCP(configRepo, graphRepos, exe)
+	}
+}
+
+// graphWiringEnabled reports whether a launch should auto-wire the code-graph
+// MCP: the assistant must be an MCP consumer (Claude or Codex) and wiring must
+// not be suppressed.
+func (m model) graphWiringEnabled() bool {
+	return (m.assistantIsClaude() || m.assistantIsCodex()) && !m.graphWireSuppressed()
+}
+
+// graphWireSuppressed reports whether the user has opted out of auto-wiring,
+// either for the session (the m toggle) or durably via ORCHARD_GRAPH_MCP=0.
+func (m model) graphWireSuppressed() bool {
+	if m.graphWireOff {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ORCHARD_GRAPH_MCP"))) {
+	case "0", "false", "no", "off":
+		return true
+	}
+	return false
+}
+
+// graphSuffix is a short status note shown when a launch wires the code graph.
+func (m model) graphSuffix() string {
+	if m.graphWiringEnabled() {
+		return " · graph wired"
+	}
+	return ""
+}
+
+// assistantIsCodex reports whether the resolved assistant is OpenAI Codex.
+func (m model) assistantIsCodex() bool {
+	return strings.Contains(strings.ToLower(m.assistantCmd), "codex")
+}
 
 // Opt-in env (Claude Code 2.1.20+) that loads added --add-dir repos' CLAUDE.md.
 // See github.com/anthropics/claude-code issues/21138.
@@ -70,6 +124,9 @@ func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 		m.status = "nothing to open"
 		return m, nil
 	}
+	for _, r := range targets {
+		m.wireGraphMCP(r.Path, []string{r.Path})
+	}
 	prog, label := m.assistantCmd, m.assistantLabel
 	if _, ok := termlaunch.NewTab(targets[0].Path, prog); !ok {
 		fields := strings.Fields(prog)
@@ -83,7 +140,8 @@ func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	for i, r := range targets {
 		dirs[i] = r.Path
 	}
-	m.status = fmt.Sprintf("opening %s in %d new tab(s)", label, len(targets))
+	suffix := m.graphSuffix()
+	m.status = fmt.Sprintf("opening %s in %d new tab(s)%s", label, len(targets), suffix)
 	return m, func() tea.Msg {
 		opened := 0
 		for _, dir := range dirs {
@@ -93,7 +151,7 @@ func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return statusMsg{text: fmt.Sprintf("opened %s in %d tab(s)", label, opened)}
+		return statusMsg{text: fmt.Sprintf("opened %s in %d tab(s)%s", label, opened, suffix)}
 	}
 }
 
@@ -112,7 +170,11 @@ func shQuote(s string) string {
 // runAssistant launches the assistant once in cwd with the given flag args, in a
 // new terminal tab (falling back to running in place). The tab path goes through
 // a shell so args are shell-quoted; the in-place fallback uses argv directly.
-func (m model) runAssistant(cwd string, args, env []string, status string) (tea.Model, tea.Cmd) {
+func (m model) runAssistant(cwd string, args, env []string, status string, graphRepos []string) (tea.Model, tea.Cmd) {
+	m.wireGraphMCP(cwd, graphRepos)
+	if len(graphRepos) > 0 {
+		status += m.graphSuffix()
+	}
 	prog := m.assistantCmd
 	for _, a := range args {
 		prog += " " + shQuote(a)
@@ -148,7 +210,7 @@ func (m model) openClaudeResume(r repo.Repo) (tea.Model, tea.Cmd) {
 	if !m.assistantIsClaude() {
 		return m.openClaude([]repo.Repo{r})
 	}
-	return m.runAssistant(r.Path, []string{"--continue"}, nil, "resuming "+m.assistantLabel+" · "+r.Name)
+	return m.runAssistant(r.Path, []string{"--continue"}, nil, "resuming "+m.assistantLabel+" · "+r.Name, []string{r.Path})
 }
 
 // openClaudeCombined opens one Claude session spanning the selected repos via
@@ -174,7 +236,13 @@ func (m model) openClaudeCombined(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	if len(mem) > 0 {
 		status += " (shared CLAUDE.md)"
 	}
-	return m.runAssistant(targets[0].Path, args, mem, status)
+	// Cross-repo: wire one orchard MCP into the primary repo serving the graphs
+	// of all session repos, so the agent can query across them.
+	graphRepos := make([]string, len(targets))
+	for i, r := range targets {
+		graphRepos[i] = r.Path
+	}
+	return m.runAssistant(targets[0].Path, args, mem, status, graphRepos)
 }
 
 // commitMsgPrompt is the prompt used when drafting a commit message in a terminal

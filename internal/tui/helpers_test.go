@@ -166,8 +166,8 @@ func TestGroupWorktree(t *testing.T) {
 func TestGridLayoutSumsToWidth(t *testing.T) {
 	for _, w := range []int{100, 120, 150, 200, 260} {
 		c := gridLayout(w)
-		const gaps = 18 // 10 columns, 9 gaps of 2
-		sum := c.sel + c.st + c.name + c.branch + c.lang + c.changes + c.synced + c.claude + c.activity + c.info + gaps
+		const gaps = 20 // 11 columns, 10 gaps of 2
+		sum := c.sel + c.st + c.graph + c.name + c.branch + c.lang + c.changes + c.synced + c.claude + c.activity + c.info + gaps
 		if sum != w {
 			t.Errorf("gridLayout(%d) columns sum to %d, want %d", w, sum, w)
 		}

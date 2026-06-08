@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
+	"github.com/prakashkurup/orchard/internal/graph"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
@@ -264,6 +265,143 @@ func TestDetailHealthNudges(t *testing.T) {
 	out = ansiPattern.ReplaceAllString(m.detailBody(120), "")
 	if strings.Contains(out, "is large") || strings.Contains(out, "may be stale") {
 		t.Errorf("no warnings expected below thresholds\n%s", out)
+	}
+}
+
+func TestAIReadinessCardReady(t *testing.T) {
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.assistantCmd = "claude"
+	m.assistantLabel = "Claude"
+	m.instructionsByPath = map[string]instrState{
+		"/repo": {hasClaude: true, hasAgents: true, imports: true},
+	}
+	m.detail = &detailState{
+		repo: repo.Repo{Path: "/repo", Name: "repo", Head: "abcdef123456"},
+		graph: graph.GraphState{
+			HeadCommit: "abcdef123456",
+			DirtyFiles: 0,
+			Files:      3,
+			Symbols:    5,
+			Edges:      7,
+			Tiers:      map[graph.Tier]int{graph.TierPrecise: 3},
+			Trust:      []graph.LangTrust{{Lang: "go", Tier: graph.TierPrecise, Files: 3}},
+		},
+		graphOK: true,
+	}
+
+	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
+	for _, want := range []string{
+		"AI readiness",
+		"ready to launch",
+		"graph fresh",
+		"trust Go: precise",
+		"MCP auto-wires Claude",
+		"context ready",
+		"AI edits none",
+		"launch safely with c",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("readiness card missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestAIReadinessCardFixesActionableIssues(t *testing.T) {
+	now := time.Now()
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.assistantCmd = "claude"
+	m.assistantLabel = "Claude"
+	m.graphWireOff = true
+	m.instructionsByPath = map[string]instrState{
+		"/repo": {hasAgents: true},
+	}
+	m.detail = &detailState{
+		repo: repo.Repo{Path: "/repo", Name: "repo", Head: "abcdef123456"},
+		info: orchardgit.DetailInfo{StatusLines: []string{" M src/a.go"}},
+		touched: []claude.TouchedFile{{
+			Path: "src/a.go", Writes: 1, Last: now,
+		}},
+	}
+
+	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
+	for _, want := range []string{
+		"AI readiness",
+		"needs attention",
+		"graph never built",
+		"MCP wiring off",
+		"AGENTS.md not loaded",
+		"1 AI edit uncommitted",
+		"press B to build the code graph",
+		"press m to enable graph MCP wiring",
+		"press I to create CLAUDE.md importing @AGENTS.md",
+		"review or commit Claude-edited dirty files",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("readiness card missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestAIReadinessCardExplainsGraphStaleness(t *testing.T) {
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.assistantCmd = "claude"
+	m.assistantLabel = "Claude"
+	m.instructionsByPath = map[string]instrState{
+		"/repo": {hasClaude: true, hasAgents: true, imports: true},
+	}
+	m.detail = &detailState{
+		repo: repo.Repo{Path: "/repo", Name: "repo", Head: "newhead", Dirty: true},
+		graph: graph.GraphState{
+			HeadCommit: "oldhead",
+			Files:      4,
+			Symbols:    8,
+			Edges:      12,
+			Changed:    2,
+			Trust:      []graph.LangTrust{{Lang: "kotlin", Tier: graph.TierBestEffort, Files: 4}},
+		},
+		graphOK: true,
+	}
+
+	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
+	for _, want := range []string{
+		"graph HEAD moved",
+		"dirty tree",
+		"2 files changed",
+		"trust Kotlin: best-effort",
+		"press B to rebuild at the current HEAD",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("readiness/detail should explain stale graph reason %q\n%s", want, out)
+		}
+	}
+}
+
+func TestDetailShowsGraphSetupNudge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ORCHARD_AST_GREP_PATH", "")
+
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.assistantCmd = "claude"
+	m.assistantLabel = "Claude"
+	m.instructionsByPath = map[string]instrState{
+		"/repo": {hasClaude: true},
+	}
+	m.detail = &detailState{
+		repo:  repo.Repo{Path: "/repo", Name: "repo"},
+		langs: []lang.Stat{{Name: "Go"}, {Name: "Kotlin"}},
+	}
+
+	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
+	want := "ast-grep missing · press B to build Go only · run orchard graph install-ast-grep for full graph"
+	if !strings.Contains(out, want) {
+		t.Fatalf("detail should nudge ast-grep setup\n%s", out)
 	}
 }
 
