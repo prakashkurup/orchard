@@ -8,14 +8,14 @@ import (
 )
 
 // resolveAssistant chooses the AI coding assistant launched by `c`: an explicit
-// $ORCHARD_AI_CMD if set (e.g. "claude", "copilot", or "gh copilot"), otherwise
-// the first of claude / copilot found on PATH. label is the short name shown in
-// the footer; ok is false when nothing is available (the `c` hint then hides).
+// $ORCHARD_AI_CMD if set (e.g. "claude" or "codex"), otherwise the first of
+// claude / codex found on PATH. label is the short name shown in the footer; ok
+// is false when nothing is available (the `c` hint then hides).
 func resolveAssistant() (cmd, label string, ok bool) {
 	if env := strings.TrimSpace(os.Getenv("ORCHARD_AI_CMD")); env != "" {
 		return env, assistantLabel(env), true
 	}
-	for _, c := range []string{"claude", "copilot"} {
+	for _, c := range []string{"claude", "codex"} {
 		if _, err := exec.LookPath(c); err == nil {
 			return c, c, true
 		}

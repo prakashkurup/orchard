@@ -117,7 +117,7 @@ func (m model) selectionTargets() []repo.Repo {
 // to suspending into the first repo.
 func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	if m.assistantCmd == "" {
-		m.status = "no AI assistant found (install claude or copilot, or set ORCHARD_AI_CMD)"
+		m.status = "no AI assistant found (install claude or codex, or set ORCHARD_AI_CMD)"
 		return m, nil
 	}
 	if len(targets) == 0 {

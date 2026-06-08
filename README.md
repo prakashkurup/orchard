@@ -143,7 +143,7 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 
 ### Adapt to your setup
 
-- **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `copilot` found on your `PATH`.
+- **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `codex` found on your `PATH`.
 
 ### Claude Code panel or column empty?
 
