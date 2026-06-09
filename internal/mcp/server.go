@@ -397,7 +397,7 @@ func addTools(s *sdk.Server, repos []RepoGraph) {
 		for _, r := range repos {
 			rows, err := r.G.RepoMap(lim)
 			if err != nil {
-				continue
+				return nil, repoMapOut{}, fmt.Errorf("%s: %w", r.Name, err)
 			}
 			for _, m := range rows {
 				hits = append(hits, mapHit{Repo: r.Name, MapRow: m})
@@ -417,7 +417,10 @@ func addTools(s *sdk.Server, repos []RepoGraph) {
 		lim := limitOr(in.Limit, defaultLimit)
 		var hits []defHit
 		for _, r := range repos {
-			rows, _ := r.G.FindDef(in.Name, lim)
+			rows, err := r.G.FindDef(in.Name, lim)
+			if err != nil {
+				return nil, defOut{}, fmt.Errorf("%s: %w", r.Name, err)
+			}
 			for _, d := range rows {
 				hits = append(hits, defHit{Repo: r.Name, DefRow: d})
 			}
@@ -438,9 +441,15 @@ func addTools(s *sdk.Server, repos []RepoGraph) {
 		if offset < 0 {
 			offset = 0
 		}
+		if offset > maxLimit { // bound so lim+offset cannot overflow into a negative LIMIT
+			offset = maxLimit
+		}
 		var hits []callerHit
 		for _, r := range repos {
-			rows, _ := r.G.WhoCalls(in.Name, lim+offset, 0)
+			rows, err := r.G.WhoCalls(in.Name, lim+offset, 0)
+			if err != nil {
+				return nil, callersOut{}, fmt.Errorf("%s: %w", r.Name, err)
+			}
 			for _, c := range rows {
 				hits = append(hits, callerHit{Repo: r.Name, CallerRow: c})
 			}
@@ -470,7 +479,10 @@ func addTools(s *sdk.Server, repos []RepoGraph) {
 		lim := limitOr(in.Limit, maxLimit)
 		var hits []impactHit
 		for _, r := range repos {
-			rows, _ := r.G.BlastRadius(in.Name, depth, lim)
+			rows, err := r.G.BlastRadius(in.Name, depth, lim)
+			if err != nil {
+				return nil, blastOut{}, fmt.Errorf("%s: %w", r.Name, err)
+			}
 			for _, x := range rows {
 				hits = append(hits, impactHit{Repo: r.Name, ImpactRow: x})
 			}
@@ -489,7 +501,10 @@ func addTools(s *sdk.Server, repos []RepoGraph) {
 		lim := limitOr(in.Limit, defaultLimit)
 		var hits []defHit
 		for _, r := range repos {
-			rows, _ := r.G.SearchSymbols(in.Query, lim)
+			rows, err := r.G.SearchSymbols(in.Query, lim)
+			if err != nil {
+				return nil, defOut{}, fmt.Errorf("%s: %w", r.Name, err)
+			}
 			for _, d := range rows {
 				hits = append(hits, defHit{Repo: r.Name, DefRow: d})
 			}

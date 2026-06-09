@@ -228,6 +228,10 @@ func (s *Store) reconstruct(keep map[string]fileMeta) ([]FileGraph, error) {
 			symsByFile[path] = append(symsByFile[path], sym)
 		}
 	}
+	if err := srows.Err(); err != nil {
+		srows.Close()
+		return nil, err
+	}
 	srows.Close()
 
 	edgesByFile := map[string][]Edge{}
@@ -249,6 +253,10 @@ func (s *Store) reconstruct(keep map[string]fileMeta) ([]FileGraph, error) {
 		if _, ok := keep[path]; ok {
 			edgesByFile[path] = append(edgesByFile[path], e)
 		}
+	}
+	if err := erows.Err(); err != nil {
+		erows.Close()
+		return nil, err
 	}
 	erows.Close()
 

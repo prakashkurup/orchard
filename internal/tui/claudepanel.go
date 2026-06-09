@@ -18,20 +18,21 @@ import (
 // .mcp.json before a Claude Code launch, serving the graphs of graphRepos (one
 // repo normally; several for a cross-repo `A` session). Best-effort, idempotent,
 // Claude-only; set ORCHARD_GRAPH_MCP=0 to disable.
-func (m model) wireGraphMCP(configRepo string, graphRepos []string) {
+func (m model) wireGraphMCP(configRepo string, graphRepos []string) error {
 	if len(graphRepos) == 0 || !m.graphWiringEnabled() {
-		return
+		return nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return
+		return err
 	}
-	switch { // best-effort; never block a launch
+	switch { // never block a launch; the caller surfaces any failure in the status
 	case m.assistantIsClaude():
-		_, _ = agentcfg.EnsureClaudeMCP(configRepo, graphRepos, exe)
+		_, err = agentcfg.EnsureClaudeMCP(configRepo, graphRepos, exe)
 	case m.assistantIsCodex():
-		_, _ = agentcfg.EnsureCodexMCP(configRepo, graphRepos, exe)
+		_, err = agentcfg.EnsureCodexMCP(configRepo, graphRepos, exe)
 	}
+	return err
 }
 
 // graphWiringEnabled reports whether a launch should auto-wire the code-graph
@@ -54,12 +55,16 @@ func (m model) graphWireSuppressed() bool {
 	return false
 }
 
-// graphSuffix is a short status note shown when a launch wires the code graph.
-func (m model) graphSuffix() string {
-	if m.graphWiringEnabled() {
-		return " · graph wired"
+// graphSuffix is a short status note shown when a launch wires the code graph,
+// reflecting whether the config write actually succeeded.
+func (m model) graphSuffix(err error) string {
+	if !m.graphWiringEnabled() {
+		return ""
 	}
-	return ""
+	if err != nil {
+		return " · graph wiring failed"
+	}
+	return " · graph wired"
 }
 
 // assistantIsCodex reports whether the resolved assistant is OpenAI Codex.
@@ -124,8 +129,11 @@ func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 		m.status = "nothing to open"
 		return m, nil
 	}
+	var wireErr error
 	for _, r := range targets {
-		m.wireGraphMCP(r.Path, []string{r.Path})
+		if e := m.wireGraphMCP(r.Path, []string{r.Path}); e != nil {
+			wireErr = e
+		}
 	}
 	prog, label := m.assistantCmd, m.assistantLabel
 	if _, ok := termlaunch.NewTab(targets[0].Path, prog); !ok {
@@ -140,7 +148,7 @@ func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	for i, r := range targets {
 		dirs[i] = r.Path
 	}
-	suffix := m.graphSuffix()
+	suffix := m.graphSuffix(wireErr)
 	m.status = fmt.Sprintf("opening %s in %d new tab(s)%s", label, len(targets), suffix)
 	return m, func() tea.Msg {
 		opened := 0
@@ -171,9 +179,9 @@ func shQuote(s string) string {
 // new terminal tab (falling back to running in place). The tab path goes through
 // a shell so args are shell-quoted; the in-place fallback uses argv directly.
 func (m model) runAssistant(cwd string, args, env []string, status string, graphRepos []string) (tea.Model, tea.Cmd) {
-	m.wireGraphMCP(cwd, graphRepos)
+	wireErr := m.wireGraphMCP(cwd, graphRepos)
 	if len(graphRepos) > 0 {
-		status += m.graphSuffix()
+		status += m.graphSuffix(wireErr)
 	}
 	prog := m.assistantCmd
 	for _, a := range args {

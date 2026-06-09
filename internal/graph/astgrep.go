@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // astGrepProvider extracts symbols and edges by shelling out to ast-grep
@@ -147,7 +148,7 @@ const agScanChunk = 300
 // (chunked) and returns matches. Scanning an explicit file set — rather than the
 // whole repo — is what lets incremental reindex re-scan only changed files. It
 // tolerates a non-zero exit and parses whatever JSON came back on stdout.
-func (a astGrepProvider) scan(ctx context.Context, repoRoot, lang, kind string, rels []string) []agMatch {
+func (a astGrepProvider) scan(ctx context.Context, repoRoot, lang, kind string, rels []string) ([]agMatch, error) {
 	rule := fmt.Sprintf("id: r\nlanguage: %s\nrule:\n  kind: %s\n", lang, kind)
 	var matches []agMatch
 	for start := 0; start < len(rels); start += agScanChunk {
@@ -158,7 +159,15 @@ func (a astGrepProvider) scan(ctx context.Context, repoRoot, lang, kind string, 
 		args := append([]string{"scan", "--inline-rules", rule, "--json=stream"}, rels[start:end]...)
 		cmd := exec.CommandContext(ctx, a.bin, args...)
 		cmd.Dir = repoRoot
-		out, _ := cmd.Output() // ignore exit code; parse what we got
+		out, err := cmd.Output()
+		// A non-zero exit with output is expected (ast-grep signals matches that
+		// way); we parse stdout regardless. But if the binary could not run at all
+		// (missing, not executable, killed), surface that instead of silently
+		// returning an empty graph.
+		var exitErr *exec.ExitError
+		if err != nil && !errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("ast-grep scan (%s/%s): %w", lang, kind, err)
+		}
 		dec := json.NewDecoder(bytes.NewReader(out))
 		for {
 			var m agMatch
@@ -171,7 +180,7 @@ func (a astGrepProvider) scan(ctx context.Context, repoRoot, lang, kind string, 
 			matches = append(matches, m)
 		}
 	}
-	return matches
+	return matches, nil
 }
 
 // Extract runs ast-grep once per def/call kind over the repo, keeps matches in
@@ -206,7 +215,11 @@ func (a astGrepProvider) Extract(ctx context.Context, repoRoot, lang string, fil
 	spans := map[string][]span{}
 
 	for _, d := range spec.defs {
-		for _, m := range a.scan(ctx, repoRoot, lang, d.kind, rels) {
+		ms, err := a.scan(ctx, repoRoot, lang, d.kind, rels)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range ms {
 			rel := normalizeRel(m.File)
 			if !allowed[rel] {
 				continue
@@ -237,7 +250,11 @@ func (a astGrepProvider) Extract(ctx context.Context, repoRoot, lang string, fil
 	}
 
 	for _, ck := range spec.calls {
-		for _, m := range a.scan(ctx, repoRoot, lang, ck, rels) {
+		ms, err := a.scan(ctx, repoRoot, lang, ck, rels)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range ms {
 			rel := normalizeRel(m.File)
 			if !allowed[rel] {
 				continue
@@ -273,20 +290,26 @@ func identBeforeParen(s string) string {
 	return ""
 }
 
-var kwRe = map[string]*regexp.Regexp{}
+var (
+	kwReMu sync.Mutex
+	kwRe   = map[string]*regexp.Regexp{}
+)
 
 // defName reads a definition's name from its node text: the identifier after the
 // keyword (e.g. "fun foo" → "foo"), or — for keyword-less C-style declarators —
-// the identifier before '('.
+// the identifier before '('. The keyword-regex cache is mutex-guarded because
+// Extract runs concurrently across repos/languages.
 func defName(d agDef, text string) string {
 	if d.keyword == "" {
 		return identBeforeParen(text)
 	}
+	kwReMu.Lock()
 	re := kwRe[d.keyword]
 	if re == nil {
 		re = regexp.MustCompile(`\b` + regexp.QuoteMeta(d.keyword) + `\s+([A-Za-z_]\w*)`)
 		kwRe[d.keyword] = re
 	}
+	kwReMu.Unlock()
 	if m := re.FindStringSubmatch(text); m != nil {
 		return m[1]
 	}
