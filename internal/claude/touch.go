@@ -10,21 +10,6 @@ import (
 	"time"
 )
 
-// TouchedFile is one file a Claude session read or edited inside a repo, with how
-// many times and when it was last touched.
-type TouchedFile struct {
-	Path   string // relative to the repo root
-	Reads  int
-	Writes int
-	Last   time.Time
-}
-
-// Wrote reports whether Claude edited (not just read) the file.
-func (t TouchedFile) Wrote() bool { return t.Writes > 0 }
-
-// Touches is the total number of read/edit tool calls against the file.
-func (t TouchedFile) Touches() int { return t.Reads + t.Writes }
-
 // touchLine is the minimal slice of a transcript line we parse: the tool_use
 // blocks and the file path each one carries (Bash and other tools carry none).
 type touchLine struct {

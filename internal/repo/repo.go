@@ -96,6 +96,8 @@ type Repo struct {
 	Stashes       int          `json:"stashes,omitempty"`
 	CCSessions    int          `json:"cc_sessions,omitempty"`
 	CCLast        time.Time    `json:"cc_last,omitempty"`
+	CodexSessions int          `json:"codex_sessions,omitempty"`
+	CodexLast     time.Time    `json:"codex_last,omitempty"`
 	Activity      []int        `json:"-"` // weekly commit counts, oldest first, for the sparkline
 	Display       DisplayState `json:"display"`
 	SkipReason    string       `json:"skip_reason,omitempty"`

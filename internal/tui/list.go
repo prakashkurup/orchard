@@ -391,7 +391,7 @@ func (m model) gridHeader(width int) string {
 		padRight("LANG", layout.lang),
 		padRight("CHANGES", layout.changes),
 		padRight("SYNCED", layout.synced),
-		padRight("CLAUDE", layout.claude),
+		padRight("AGENT", layout.agent),
 		padRight("ACTIVITY", layout.activity),
 		padRight("LAST COMMIT / RESULT", layout.info),
 	}
@@ -632,7 +632,7 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 		padRight(langText, layout.lang),
 		padRight("", layout.changes),
 		padRight(syncedText, layout.synced),
-		padRight("", layout.claude),
+		padRight("", layout.agent),
 		padRight("", layout.activity),
 		padRight(info, layout.info),
 	}
@@ -642,8 +642,8 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 	}
 	// merged CHANGES: ahead/behind + working-tree changes + stashes as tokens
 	out[6] = gitStateCell(r, layout.changes, bgColor, current)
-	// CLAUDE: last session age, flagged red when Claude-edited work is uncommitted
-	out[8] = claudeCell(r, layout.claude, bgColor, current)
+	// AGENT: per-agent last-run marks (Claude, Codex), flagged when AI work is uncommitted
+	out[8] = agentCell(r, layout.agent, bgColor, current)
 	// activity sparkline: weekly commit cadence, tinted by recency
 	out[9] = sparkline(r.Activity, layout.activity, bgColor, current)
 	// info column gets a "↑N new" badge when there are new commits since last
@@ -671,31 +671,65 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 	return strings.Join(out, gap)
 }
 
-// claudeCell shows how long ago Claude Code last ran in a repo, freshness-tinted
-// like SYNCED. A dim dot means no sessions. When the repo is dirty and Claude ran
-// recently, it turns red with a leading "!" to flag Claude-edited work that has
-// not been committed yet, so AI changes are not lost in an unstaged tree.
-// claudeActiveWindow: how recently a transcript must have been written for the
-// CLAUDE cell to read "live" (a session writing right now).
-const claudeActiveWindow = 60 * time.Second
+// agentActiveWindow: how recently a session must have been written for the AGENT
+// cell to read "live" (an agent writing right now).
+const agentActiveWindow = 60 * time.Second
 
-func claudeCell(r repo.Repo, width int, bgColor string, current bool) string {
-	if r.CCSessions == 0 || r.CCLast.IsZero() {
+// brand marks for each agent in the AGENT column (no official Unicode logo
+// exists; these are distinct, single-width, brand-colored marks).
+const (
+	claudeMark = "✶"
+	codexMark  = "❖"
+)
+
+// agentCell shows, per repo, which AI agents have run and when: a brand mark for
+// each of Claude and Codex (the more recent one bright, the older dimmed), then
+// the freshest age. A dim dot means no agent has run. When the repo is dirty and
+// an agent ran recently, the age turns red with a "!" to flag uncommitted AI work.
+func agentCell(r repo.Repo, width int, bgColor string, current bool) string {
+	clHas := r.CCSessions > 0 && !r.CCLast.IsZero()
+	cxHas := r.CodexSessions > 0 && !r.CodexLast.IsZero()
+	if !clHas && !cxHas {
 		return cellStyle(muted, bgColor, false).Render(padRight("·", width))
 	}
-	recent := time.Since(r.CCLast)
-	live := recent < claudeActiveWindow && recent > -claudeActiveWindow // small clock skew still counts as live
-	dirtyHot := r.Dirty && recent < 24*time.Hour                        // uncommitted AI work, the stronger signal
+
+	last := r.CCLast
+	if r.CodexLast.After(last) {
+		last = r.CodexLast
+	}
+	recent := time.Since(last)
+	live := recent < agentActiveWindow && recent > -agentActiveWindow
+	dirtyHot := r.Dirty && recent < 24*time.Hour
+
+	// each agent's mark in its brand colour; the older of the two is dimmed
+	mark := func(mk, brand string, has bool, this, other time.Time) string {
+		if !has {
+			return ""
+		}
+		fg := brand
+		if !other.IsZero() && other.After(this) {
+			fg = muted
+		}
+		return cellStyle(fg, bgColor, false).Render(mk)
+	}
+	marks := mark(claudeMark, claudeC, clHas, r.CCLast, r.CodexLast) +
+		mark(codexMark, codexC, cxHas, r.CodexLast, r.CCLast)
+
+	ageText, ageFg, bold := relTime(last), freshnessColor(last), current
 	switch {
 	case dirtyHot && live:
-		return cellStyle(red, bgColor, true).Render(padRight("!live", width))
+		ageText, ageFg, bold = "!live", red, true
 	case live:
-		return cellStyle(green, bgColor, true).Render(padRight("● live", width))
+		ageText, ageFg, bold = "live", green, true
 	case dirtyHot:
-		return cellStyle(red, bgColor, current).Render(padRight("!"+relTime(r.CCLast), width))
-	default:
-		return cellStyle(freshnessColor(r.CCLast), bgColor, current).Render(padRight(relTime(r.CCLast), width))
+		ageText, ageFg, bold = "!"+relTime(last), red, current
 	}
+	content := marks + " " + cellStyle(ageFg, bgColor, bold).Render(ageText)
+	content = lipgloss.NewStyle().MaxWidth(width).Render(content) // never overflow the column
+	if pad := width - lipgloss.Width(content); pad > 0 {
+		content += cellStyle(muted, bgColor, false).Render(strings.Repeat(" ", pad))
+	}
+	return content
 }
 
 // sparkline renders weekly commit counts as a compact bar chart sized to width.
@@ -828,22 +862,23 @@ type gridColumns struct {
 	lang     int
 	changes  int
 	synced   int
-	claude   int
+	agent    int
 	activity int
 	info     int
 }
 
 func gridLayout(width int) gridColumns {
 	// 11 columns => 10 gaps of 2 spaces = 20. GR is the code-graph badge (fresh/
-	// stale); CLAUDE shows the last Claude Code session age per repo.
-	const sel, st, graph, lang, changes, synced, claude, activity, gaps = 4, 2, 2, 5, 11, 6, 6, 10, 20
-	fixed := sel + st + graph + lang + changes + synced + claude + activity + gaps
+	// stale); AGENT shows when each AI agent (Claude Code, Codex) last ran per
+	// repo, marked per agent and freshness-tinted.
+	const sel, st, graph, lang, changes, synced, agent, activity, gaps = 4, 2, 2, 5, 11, 6, 8, 10, 20
+	fixed := sel + st + graph + lang + changes + synced + agent + activity + gaps
 	avail := max(24, width-fixed)
-	name := clamp(avail*42/100, 16, 36)
-	branch := clamp(avail*30/100, 12, 26)
+	name := clamp(avail*42/100, 15, 36)
+	branch := clamp(avail*30/100, 11, 26)
 	info := max(0, width-fixed-name-branch) // flex column: takes the exact remainder
 	return gridColumns{
 		sel: sel, st: st, graph: graph, name: name, branch: branch, lang: lang,
-		changes: changes, synced: synced, claude: claude, activity: activity, info: info,
+		changes: changes, synced: synced, agent: agent, activity: activity, info: info,
 	}
 }

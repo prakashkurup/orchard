@@ -27,7 +27,8 @@ const (
 	rowAlt    = "#1B1E2C" // zebra row
 	rowHot    = "#3E54AE" // selected row (vivid indigo - ties blue + purple)
 	selFg     = "#F5F7FF" // selected-row text (bright, crisp)
-	claudeC   = "#FF9E64" // orange - Claude accent
+	claudeC   = "#FF9E64" // orange - Claude accent (Anthropic warm)
+	codexC    = "#19C37D" // green - Codex accent (OpenAI)
 )
 
 // Nerd Font glyphs (FontAwesome/Octicon range, present in any Nerd Font v3).
