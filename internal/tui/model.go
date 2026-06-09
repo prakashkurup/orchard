@@ -604,6 +604,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.intro = newIntro(m.innerWidth(), max(1, m.height-2))
 			return m, m.startAnim()
 		}
+		if m.intro != nil {
+			// A resize mid-intro reflows the terminal under the renderer's diff
+			// cache; clear so frames drawn at the old size cannot linger.
+			return m, tea.ClearScreen
+		}
 		return m, nil
 
 	case scanMsg:

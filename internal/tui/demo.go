@@ -261,6 +261,17 @@ func demoSessions() []claude.Session {
 	}
 }
 
+// demoGraphStates fabricates per-repo code-graph badges: a few built-and-fresh,
+// one gone stale, so the GR column renders in screenshots.
+func demoGraphStates() map[string]graphBadgeState {
+	return map[string]graphBadgeState{
+		"/orchard-demo/acme-web":     graphBadgeStale, // dirty tree since the graph was built
+		"/orchard-demo/payments-api": graphBadgeFresh,
+		"/orchard-demo/auth-service": graphBadgeFresh,
+		"/orchard-demo/gateway":      graphBadgeFresh,
+	}
+}
+
 // demoTouched returns a fabricated touch map. The first three paths match the
 // dirty StatusLines in demoDetail so the "uncommitted" flag is visible.
 func demoTouched() []claude.TouchedFile {

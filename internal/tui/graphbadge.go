@@ -22,6 +22,9 @@ type graphStatesMsg struct{ states map[string]graphBadgeState }
 // classifies it fresh/stale against the repo's current HEAD and working tree. A
 // repo with no graph is simply absent from the map (→ graphBadgeNone).
 func graphStatesCmd(repos []repo.Repo) tea.Cmd {
+	if demoMode() {
+		return func() tea.Msg { return graphStatesMsg{states: demoGraphStates()} }
+	}
 	type want struct {
 		path, head string
 		dirty      bool
