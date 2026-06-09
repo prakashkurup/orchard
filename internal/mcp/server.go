@@ -2,7 +2,7 @@
 // (Claude Code, OpenAI Codex) over the Model Context Protocol, so the agent
 // queries structure instead of reading whole files. With several repos it
 // answers across all of them (orchard's cross-repo view). It is read-only and
-// exposes signatures, never file bodies. See notes/codegraph-design.md §8.
+// exposes signatures, never file bodies.
 package mcp
 
 import (

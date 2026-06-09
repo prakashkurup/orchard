@@ -18,8 +18,8 @@ import (
 // astGrepProvider extracts symbols and edges by shelling out to ast-grep
 // (https://ast-grep.github.io) — a Rust binary that bundles the real tree-sitter
 // grammars (with their external scanners), so it parses Kotlin/C#/C/C++ etc.
-// cleanly where the pure-Go grammars fall down. It is the design's "hard
-// language" backend (see notes/codegraph-design.md §10.6/§10.8).
+// cleanly where the pure-Go grammars fall down. It is the "hard language"
+// parser backend.
 //
 // It scans an explicit file set once per node kind (ast-grep is fast and
 // parallel) rather than spawning a process per file — and because the set is

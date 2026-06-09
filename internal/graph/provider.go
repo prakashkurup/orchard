@@ -1,7 +1,7 @@
 // Package graph builds a per-repository code graph — symbols (functions, types,
 // methods, …) and the call/reference edges between them — and stores it in
 // SQLite so an AI coding agent can query structure instead of reading whole
-// files. See notes/codegraph-design.md for the full design.
+// files.
 //
 // Parsing is pluggable: each language is handled by a ParserProvider. Go uses
 // the standard library (precise); other languages use tree-sitter or ast-grep
