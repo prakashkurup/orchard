@@ -95,12 +95,14 @@ If you juggle many repositories and lean on Claude Code, orchard is the cockpit 
 - **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
 - **Worklog** (`L`) - your own commits across all repos in a time window.
 - **Clone** (`+`) a new repo into the dashboard, or `orchard clone` a scoped GitHub org.
-- **Claude Code aware** - usage panel, a per-repo activity column, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code](#claude-code) below.
+- **Agent aware (Claude Code + Codex)** - usage panel, a per-repo AGENT column marking each agent that ran, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code & Codex](#claude-code--codex) below.
 - **Scriptable CLI** - `scan`, `pull`, `clone` with `--json` for cron and pipelines.
 
-## Claude Code
+## Claude Code & Codex
 
-orchard treats Claude Code as a first-class part of a multi-repo workflow. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR` if you have relocated them); nothing is sent anywhere.
+orchard treats AI coding agents as a first-class part of a multi-repo workflow, with the same treatment for **Claude Code** and **OpenAI Codex**. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR`) and your `~/.codex` session rollouts (or `$CODEX_HOME`); nothing is sent anywhere.
+
+The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set, else the first of `claude` / `codex` on your `PATH`. The dashboard's `AGENT` column marks each agent that has run in a repo (both marks when you used both), and repos worked with both agents show both footprints side by side in the detail view.
 
 ### See activity
 
@@ -144,6 +146,10 @@ orchard treats Claude Code as a first-class part of a multi-repo workflow. Every
 ### Adapt to your setup
 
 - **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `codex` found on your `PATH`.
+
+### Codex parity
+
+When Codex is the resolved assistant, the same keys drive it: `C` resumes the last session (`codex resume --last`), `H` browses and resumes past sessions, `R` searches session content, `f` lists the files it edited, `A` spans repos via `--add-dir`, and `M` drafts a commit message headlessly (`codex exec` in a read-only sandbox). Codex activity always shows regardless of which assistant launches: the `AGENT` column, the usage panel, the detail footprint, and the stats heatmaps read both agents' local history.
 
 ### Claude Code panel or column empty?
 
@@ -198,7 +204,7 @@ Press `?` in-app for the same keymap and legend.
 | `O` | open repo(s) in browser (confirms for >1 repo) |
 | `+` | clone a repo into the dashboard |
 
-### Claude actions
+### Agent actions (Claude Code / Codex)
 
 | Key | Action |
 |-----|--------|
@@ -229,7 +235,7 @@ Press `?` in-app for the same keymap and legend.
 | `T` | stats page (languages, freshest/thirstiest, Claude usage, harvest + Claude heatmaps) |
 | `/` | filter by text, or a `branch:` / `name:` prefix |
 | `tab` | cycle quick filters (attention, dirty, behind, feature, at-risk, ai-touched, needs-md) |
-| `s` / `o` | cycle sort (attention / name / synced / claude) / toggle grouping |
+| `s` / `o` | cycle sort (attention / name / synced / agent) / toggle grouping |
 
 ### App
 
