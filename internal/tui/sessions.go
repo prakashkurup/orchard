@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
 
@@ -16,14 +17,15 @@ type sessionsMsg struct {
 	sessions []claude.Session
 }
 
-// openSessions opens the Claude Code session-history picker for a repo. Resuming a
-// session needs Claude Code, so other assistants get a status note instead.
+// openSessions opens the session-history picker for a repo. Resuming needs an
+// assistant with readable history (Claude Code or Codex); other assistants get a
+// status note instead.
 func (m model) openSessions(r repo.Repo) (tea.Model, tea.Cmd) {
 	if r.Path == "" {
 		return m, nil
 	}
-	if !m.assistantIsClaude() {
-		m.status = "session history needs Claude Code"
+	if !m.agentSupportsSessions() {
+		m.status = "session history needs claude or codex"
 		return m, nil
 	}
 	m.sessionsRepo = r
@@ -32,14 +34,20 @@ func (m model) openSessions(r repo.Repo) (tea.Model, tea.Cmd) {
 	m.sessionsLoading = true
 	m.returnMode = m.mode
 	m.mode = modeSessions
-	return m, sessionsCmd(r)
+	return m, sessionsCmd(r, m.assistantIsCodex())
 }
 
-func sessionsCmd(r repo.Repo) tea.Cmd {
+func sessionsCmd(r repo.Repo, useCodex bool) tea.Cmd {
 	if demoMode() {
+		if useCodex {
+			return func() tea.Msg { return sessionsMsg{path: r.Path, sessions: demoCodexSessions()} }
+		}
 		return func() tea.Msg { return sessionsMsg{path: r.Path, sessions: demoSessions()} }
 	}
 	return func() tea.Msg {
+		if useCodex {
+			return sessionsMsg{path: r.Path, sessions: codex.Sessions(r.Path, sessionsLimit)}
+		}
 		return sessionsMsg{path: r.Path, sessions: claude.Sessions(r.Path, sessionsLimit)}
 	}
 }
@@ -62,7 +70,7 @@ func (m model) handleSessionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		s := m.sessions[m.sessionCursor]
 		r := m.sessionsRepo
 		m.mode = m.returnMode
-		return m.runAssistant(r.Path, []string{"--resume", s.ID}, nil,
+		return m.runAssistant(r.Path, m.agentResumeArgs(s.ID), nil,
 			"resuming "+m.assistantLabel+" · "+r.Name, []string{r.Path})
 	}
 	return m, nil

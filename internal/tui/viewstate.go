@@ -8,8 +8,17 @@ import (
 	"time"
 )
 
-// aiTouchedWindow: how recent a Claude run counts for the ai-touched filter.
+// aiTouchedWindow: how recent an agent run counts for the ai-touched filter.
 const aiTouchedWindow = 7 * 24 * time.Hour
+
+// lastAgentRun is the most recent time any AI agent (Claude Code or Codex) ran
+// in the repo, for agent-recency sorting and filtering.
+func lastAgentRun(r repo.Repo) time.Time {
+	if r.CodexLast.After(r.CCLast) {
+		return r.CodexLast
+	}
+	return r.CCLast
+}
 
 func (m *model) toggleCurrent() {
 	r, ok := m.currentRepo()
@@ -85,10 +94,11 @@ func (m *model) sortIndices(idxs []int) {
 		case sortSynced:
 			return ra.LastFetched.Before(rb.LastFetched)
 		case sortClaude:
-			if ra.CCLast.Equal(rb.CCLast) {
+			la, lb := lastAgentRun(ra), lastAgentRun(rb)
+			if la.Equal(lb) {
 				return strings.ToLower(ra.Name) < strings.ToLower(rb.Name)
 			}
-			return ra.CCLast.After(rb.CCLast) // most recently Claude-worked first
+			return la.After(lb) // most recently agent-worked first (Claude or Codex)
 		default: // attention
 			pa, pb := attentionRank(ra.Display), attentionRank(rb.Display)
 			if pa != pb {
@@ -112,7 +122,8 @@ func (m model) passQuick(r repo.Repo) bool {
 	case filterRisk:
 		return r.Dirty || r.Ahead > 0 || r.Stashes > 0
 	case filterAITouched:
-		return !r.CCLast.IsZero() && time.Since(r.CCLast) <= aiTouchedWindow
+		last := lastAgentRun(r)
+		return !last.IsZero() && time.Since(last) <= aiTouchedWindow
 	case filterNeedsInstr:
 		s, ok := m.instructionsByPath[r.Path]
 		return ok && s.blind() // only once instruction health is known (avoids startup flicker)

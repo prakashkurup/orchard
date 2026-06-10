@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -36,15 +37,15 @@ func commitTick() tea.Cmd {
 	return tea.Tick(110*time.Millisecond, func(time.Time) tea.Msg { return commitTickMsg{} })
 }
 
-// openCommitMessage drafts a commit message for a repo. With Claude Code it runs
-// headlessly (claude -p) and shows the result in a window; other assistants fall
-// back to a terminal session with the same prompt.
+// openCommitMessage drafts a commit message for a repo. Claude Code (claude -p)
+// and Codex (codex exec, read-only sandbox) run headlessly and show the result
+// in a window; other assistants fall back to a terminal session with the prompt.
 func (m model) openCommitMessage(r repo.Repo) (tea.Model, tea.Cmd) {
 	if m.assistantCmd == "" {
-		m.status = "no AI assistant found (install claude or set ORCHARD_AI_CMD)"
+		m.status = "no AI assistant found (install claude or codex, or set ORCHARD_AI_CMD)"
 		return m, nil
 	}
-	if !m.assistantIsClaude() {
+	if !m.assistantIsClaude() && !m.assistantIsCodex() {
 		return m.runAssistant(r.Path, []string{commitMsgPrompt}, nil, "drafting a commit message · "+r.Name, nil)
 	}
 	m.commitMsgRepo = r
@@ -76,7 +77,27 @@ func commitMsgCmd(assistantCmd string, r repo.Repo) tea.Cmd {
 			diff = diff[:12000] + "\n…(diff truncated)…"
 		}
 		fields := strings.Fields(assistantCmd)
-		args := append(append([]string{}, fields[1:]...), "-p", commitMsgPromptHeadless+"\n\n"+diff, "--output-format", "json")
+		prompt := commitMsgPromptHeadless + "\n\n" + diff
+		if strings.Contains(strings.ToLower(assistantCmd), "codex") {
+			outFile, ferr := os.CreateTemp("", "orchard-commitmsg-*")
+			if ferr != nil {
+				return commitMsgMsg{path: r.Path, err: ferr}
+			}
+			outFile.Close()
+			defer os.Remove(outFile.Name())
+			args := append(append([]string{}, fields[1:]...), codexHeadlessArgs(prompt, outFile.Name())...)
+			cmd := exec.CommandContext(ctx, fields[0], args...)
+			cmd.Dir = r.Path
+			if _, err := cmd.Output(); err != nil {
+				return commitMsgMsg{path: r.Path, err: err}
+			}
+			text, rerr := os.ReadFile(outFile.Name())
+			if rerr != nil {
+				return commitMsgMsg{path: r.Path, err: rerr}
+			}
+			return commitMsgMsg{path: r.Path, text: cleanCommitMsg(string(text))}
+		}
+		args := append(append([]string{}, fields[1:]...), claudeHeadlessArgs(prompt)...)
 		cmd := exec.CommandContext(ctx, fields[0], args...)
 		cmd.Dir = r.Path
 		out, err := cmd.Output()

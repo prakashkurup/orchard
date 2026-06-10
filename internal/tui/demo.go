@@ -217,9 +217,10 @@ func demoCommitMsg() string {
 
 // demoStatsData returns fabricated per-day commit and Claude-turn counts for the
 // stats page heatmaps (deterministic, weighted toward recent days).
-func demoStatsData() (harvest, claudeTurns map[string]int) {
+func demoStatsData() (harvest, claudeTurns, codexTurns map[string]int) {
 	harvest = map[string]int{}
 	claudeTurns = map[string]int{}
+	codexTurns = map[string]int{}
 	now := time.Now()
 	for d := 0; d < 7*statsWeeks; d++ {
 		day := now.AddDate(0, 0, -d).Format("2006-01-02")
@@ -229,8 +230,49 @@ func demoStatsData() (harvest, claudeTurns map[string]int) {
 		if d < 45 && (d*3)%4 == 0 {
 			claudeTurns[day] = 10 + (d*7)%120
 		}
+		if d < 30 && (d*5)%6 == 0 {
+			codexTurns[day] = 5 + (d*11)%70
+		}
 	}
-	return harvest, claudeTurns
+	return harvest, claudeTurns, codexTurns
+}
+
+// demoCodex returns a fabricated Codex usage rollup, mirroring demoRepos'
+// per-repo Codex footprints (payments-api worked with both agents).
+func demoCodex() claude.Usage {
+	now := time.Now()
+	return claude.Usage{
+		TotalSessions: 9,
+		TotalTurns:    164,
+		TotalTokens:   41_300_000,
+		ReposUsed:     2,
+		Models:        map[string]int{"gpt-5.5": 131, "gpt-5.4": 33},
+		Repos: []claude.RepoUsage{
+			{Name: "data-pipeline", Path: "/orchard-demo/data-pipeline", Sessions: 5, Turns: 96, Tokens: 24_100_000, Last: now.Add(-12 * time.Hour)},
+			{Name: "payments-api", Path: "/orchard-demo/payments-api", Sessions: 4, Turns: 68, Tokens: 17_200_000, Last: now.Add(-2 * time.Hour)},
+		},
+		Last: now.Add(-2 * time.Hour),
+	}
+}
+
+// demoCodexSessions returns fabricated recent Codex sessions for the detail view.
+func demoCodexSessions() []claude.Session {
+	now := time.Now()
+	return []claude.Session{
+		{ID: "019e9072-7d05-74d2-befc-demo00000001", Title: "Review the checkout retry path", Model: "gpt-5.5", Assistant: 21, Tokens: 5_400_000, Modified: now.Add(-2 * time.Hour)},
+		{ID: "019e8c00-421f-78a1-8238-demo00000002", Title: "Add idempotency keys to charges", Model: "gpt-5.5", Assistant: 14, Tokens: 3_100_000, Modified: now.Add(-26 * time.Hour)},
+		{ID: "019e8697-2714-7e43-8efa-demo00000003", Title: "Partition events by day", Model: "gpt-5.4", Assistant: 9, Tokens: 1_900_000, Modified: now.Add(-4 * 24 * time.Hour)},
+	}
+}
+
+// demoCodexTouched returns fabricated files Codex edited (patch map).
+func demoCodexTouched() []claude.TouchedFile {
+	now := time.Now()
+	return []claude.TouchedFile{
+		{Path: "src/handlers/checkout.ts", Writes: 4, Last: now.Add(-2 * time.Hour)},
+		{Path: "src/billing/idempotency.ts", Writes: 2, Last: now.Add(-26 * time.Hour)},
+		{Path: "pipeline/partition.py", Writes: 3, Last: now.Add(-4 * 24 * time.Hour)},
+	}
 }
 
 // demoGHStatus returns fabricated GitHub PR/CI status for a few demo repos.

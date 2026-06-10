@@ -26,7 +26,7 @@ func TestTouchedFlow(t *testing.T) {
 	}
 
 	// the load command (demo) populates the files
-	mm, _ = m.Update(touchedCmd(r)())
+	mm, _ = m.Update(touchedCmd(r, false)())
 	m = mm.(model)
 	if m.touchedLoading || len(m.touchedFiles) == 0 {
 		t.Fatalf("after touchedMsg expected loaded files; loading=%v n=%d", m.touchedLoading, len(m.touchedFiles))

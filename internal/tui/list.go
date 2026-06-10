@@ -124,7 +124,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "A":
 		if len(m.selected) < 2 {
-			m.status = "select 2+ repos with space, then A for one Claude session across them"
+			m.status = "select 2+ repos with space, then A for one " + m.assistantLabel + " session across them"
 			return m, nil
 		}
 		return m.openClaudeCombined(m.selectionTargets())

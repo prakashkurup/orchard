@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/agentcfg"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/termlaunch"
 	"os"
@@ -163,8 +164,7 @@ func (m model) openClaude(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	}
 }
 
-// assistantIsClaude reports whether the resolved assistant is Claude Code, which
-// is the only one that supports --continue and --add-dir.
+// assistantIsClaude reports whether the resolved assistant is Claude Code.
 func (m model) assistantIsClaude() bool {
 	return strings.Contains(strings.ToLower(m.assistantCmd), "claude")
 }
@@ -208,38 +208,43 @@ func (m model) runAssistant(cwd string, args, env []string, status string, graph
 	})
 }
 
-// openClaudeResume continues the most recent Claude session in a repo (`c`'s
-// sibling `C`). Non-Claude assistants just open normally.
+// openClaudeResume continues the most recent session in a repo (`c`'s sibling
+// `C`), with whichever assistant is resolved. Assistants without a resume
+// command just open normally.
 func (m model) openClaudeResume(r repo.Repo) (tea.Model, tea.Cmd) {
 	if m.assistantCmd == "" {
-		m.status = "no AI assistant found (install claude or set ORCHARD_AI_CMD)"
+		m.status = "no AI assistant found (install claude or codex, or set ORCHARD_AI_CMD)"
 		return m, nil
 	}
-	if !m.assistantIsClaude() {
+	if !m.agentSupportsSessions() {
 		return m.openClaude([]repo.Repo{r})
 	}
-	return m.runAssistant(r.Path, []string{"--continue"}, nil, "resuming "+m.assistantLabel+" · "+r.Name, []string{r.Path})
+	return m.runAssistant(r.Path, m.agentResumeLastArgs(), nil, "resuming "+m.assistantLabel+" · "+r.Name, []string{r.Path})
 }
 
-// openClaudeCombined opens one Claude session spanning the selected repos via
-// --add-dir, so a single conversation can work across services.
+// openClaudeCombined opens one session spanning the selected repos via
+// --add-dir (Claude Code and Codex both support it), so a single conversation
+// can work across services.
 func (m model) openClaudeCombined(targets []repo.Repo) (tea.Model, tea.Cmd) {
 	if m.assistantCmd == "" {
-		m.status = "no AI assistant found (install claude or set ORCHARD_AI_CMD)"
+		m.status = "no AI assistant found (install claude or codex, or set ORCHARD_AI_CMD)"
 		return m, nil
 	}
 	if len(targets) == 0 {
 		m.status = "nothing to open"
 		return m, nil
 	}
-	if len(targets) == 1 || !m.assistantIsClaude() {
-		return m.openClaude(targets) // one repo, or non-Claude: just open it
+	if len(targets) == 1 || !m.agentSupportsSessions() {
+		return m.openClaude(targets) // one repo, or an assistant without --add-dir
 	}
 	var args []string
 	for _, r := range targets[1:] {
 		args = append(args, "--add-dir", r.Path)
 	}
-	mem := addDirMemoryEnv()
+	var mem []string
+	if m.assistantIsClaude() {
+		mem = addDirMemoryEnv() // the shared-CLAUDE.md opt-in is Claude-specific
+	}
 	status := fmt.Sprintf("opening %s in %s + %d more via --add-dir", m.assistantLabel, targets[0].Name, len(targets)-1)
 	if len(mem) > 0 {
 		status += " (shared CLAUDE.md)"
@@ -263,14 +268,14 @@ const commitMsgPrompt = "Write a concise git commit message for the staged chang
 
 func claudeStatsCmd(repos []repo.Repo) tea.Cmd {
 	if demoMode() {
-		return func() tea.Msg { return claudeStatsMsg{usage: demoClaude()} }
+		return func() tea.Msg { return claudeStatsMsg{usage: demoClaude(), codex: demoCodex()} }
 	}
 	return func() tea.Msg {
 		targets := make([]claude.Target, 0, len(repos))
 		for _, r := range repos {
 			targets = append(targets, claude.Target{Name: r.Name, Path: r.Path})
 		}
-		return claudeStatsMsg{usage: claude.Aggregate(targets)}
+		return claudeStatsMsg{usage: claude.Aggregate(targets), codex: codex.Aggregate(targets)}
 	}
 }
 
@@ -292,6 +297,10 @@ func (m model) claudePanel(width int) string {
 	}
 	u := m.claudeUsage
 	if u.TotalSessions == 0 {
+		if cx := m.codexUsage; cx != nil && cx.TotalSessions > 0 {
+			return lipgloss.JoinVertical(lipgloss.Left, rule,
+				fillLine(fitStyled(m.codexPanelLine(), width), width, bg))
+		}
 		return one(seg(muted, "   no Claude Code sessions in these repos yet"))
 	}
 
@@ -357,14 +366,63 @@ func (m model) claudePanel(width int) string {
 	}
 	l2 := marker + segB(ice, "MODELS ") + models + seg(muted, " │  ") + segB(ice, "BUSIEST ") + busiest
 
-	return lipgloss.JoinVertical(lipgloss.Left, rule,
+	lines := []string{rule,
 		fillLine(fitStyled(l1, width), width, bg),
-		fillLine(fitStyled(l2, width), width, bg))
+		fillLine(fitStyled(l2, width), width, bg)}
+	if cx := m.codexUsage; cx != nil && cx.TotalSessions > 0 {
+		lines = append(lines, fillLine(fitStyled(m.codexPanelLine(), width), width, bg))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// codexPanelLine is the one-line Codex usage summary appended under the Claude
+// panel when Codex has run in these repos, so both agents' footprints are pinned.
+func (m model) codexPanelLine() string {
+	cx := m.codexUsage
+	marker := lipgloss.NewStyle().Foreground(lipgloss.Color(codexC)).Background(lipgloss.Color(bg)).Bold(true).Render("▌ ")
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color(codexC)).Background(lipgloss.Color(bg)).Bold(true).Render("❖ CODEX      ")
+	chip := func(icon, value, label, color string) string {
+		return seg(color, icon+" ") + segB(color, value) + seg(muted, " "+label)
+	}
+	sp := seg(muted, "    ")
+	chips := chip(iconBolt, fmt.Sprintf("%d", cx.TotalSessions), "sessions", blue) + sp +
+		chip(iconCommit, fmt.Sprintf("%d", cx.TotalTurns), "turns", green) + sp +
+		chip(iconCommit, humanTokens(cx.TotalTokens), "tokens", teal) + sp +
+		chip(iconFolder, fmt.Sprintf("%d", cx.ReposUsed), "repos", accent) + sp +
+		chip(iconClock, relTime(cx.Last), "ago", codexC)
+	top := ""
+	for name := range cx.Models {
+		if top == "" || cx.Models[name] > cx.Models[top] {
+			top = name
+		}
+	}
+	if top != "" {
+		chips += sp + seg(codexC, top)
+	}
+	return marker + title + seg(bg, " ") + chips
 }
 
 // showClaudePanel reports whether the pinned usage panel has real data to show.
 // When false the panel is hidden and the repo list reclaims its rows, so people
-// who do not use Claude Code never see an empty panel.
+// who use neither agent never see an empty panel.
 func (m model) showClaudePanel() bool {
-	return m.claudeUsage != nil && m.claudeUsage.TotalSessions > 0
+	return (m.claudeUsage != nil && m.claudeUsage.TotalSessions > 0) ||
+		(m.codexUsage != nil && m.codexUsage.TotalSessions > 0)
+}
+
+// claudePanelRows is the panel's height in rows, mirroring claudePanel's output
+// exactly so resize can budget the list's viewport.
+func (m model) claudePanelRows() int {
+	cl := m.claudeUsage != nil && m.claudeUsage.TotalSessions > 0
+	cx := m.codexUsage != nil && m.codexUsage.TotalSessions > 0
+	switch {
+	case cl && cx:
+		return 4 // rule + two Claude lines + the Codex line
+	case cl:
+		return 3
+	case cx:
+		return 2 // rule + the Codex line
+	default:
+		return 0
+	}
 }

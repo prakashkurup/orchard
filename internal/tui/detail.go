@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/graph"
 	"github.com/prakashkurup/orchard/internal/lang"
@@ -29,16 +30,18 @@ const (
 const detailSectionIndent = "    "
 
 type detailState struct {
-	repo         repo.Repo
-	info         orchardgit.DetailInfo
-	langs        []lang.Stat
-	sessions     []claude.Session     // recent Claude Code sessions in this repo
-	commitsSince int                  // commits since Claude last ran here (stale-context hint)
-	touched      []claude.TouchedFile // files Claude read/edited here (touch map)
-	graph        graph.GraphState     // code-graph snapshot (zero when graphOK is false)
-	graphOK      bool                 // a non-empty code graph has been built
-	graphMap     []graph.MapRow       // top-ranked symbols (repo map), for the detail view
-	err          string
+	repo          repo.Repo
+	info          orchardgit.DetailInfo
+	langs         []lang.Stat
+	sessions      []claude.Session     // recent Claude Code sessions in this repo
+	commitsSince  int                  // commits since Claude last ran here (stale-context hint)
+	touched       []claude.TouchedFile // files Claude read/edited here (touch map)
+	codexSessions []claude.Session     // recent Codex sessions in this repo
+	codexTouched  []claude.TouchedFile // files Codex edited here (patch map)
+	graph         graph.GraphState     // code-graph snapshot (zero when graphOK is false)
+	graphOK       bool                 // a non-empty code graph has been built
+	graphMap      []graph.MapRow       // top-ranked symbols (repo map), for the detail view
+	err           string
 }
 
 // loadGraph reads the code-graph snapshot and top symbols for a repo (read-only;
@@ -146,7 +149,7 @@ func (m model) openDetail() (tea.Model, tea.Cmd) {
 func detailCmd(r repo.Repo) tea.Cmd {
 	if demoMode() {
 		return func() tea.Msg {
-			return detailMsg{path: r.Path, info: demoDetail(r), langs: demoDetailLangs(r.Path), sessions: demoSessions(), commitsSince: 14, touched: demoTouched()}
+			return detailMsg{path: r.Path, info: demoDetail(r), langs: demoDetailLangs(r.Path), sessions: demoSessions(), commitsSince: 14, touched: demoTouched(), codexSessions: demoCodexSessions(), codexTouched: demoCodexTouched()}
 		}
 	}
 	return func() tea.Msg {
@@ -155,7 +158,7 @@ func detailCmd(r repo.Repo) tea.Cmd {
 		info, err := orchardgit.Detail(ctx, r)
 		sessions := claude.Sessions(r.Path, 10)
 		gst, gok, gmap := loadGraph(r.Path)
-		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, r.Path, sessions), touched: claude.TouchMap(r.Path, touchMapSessions), graph: gst, graphOK: gok, graphMap: gmap, err: err}
+		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, r.Path, sessions), touched: claude.TouchMap(r.Path, touchMapSessions), codexSessions: codex.Sessions(r.Path, 10), codexTouched: codex.TouchMap(r.Path, touchMapSessions), graph: gst, graphOK: gok, graphMap: gmap, err: err}
 	}
 }
 
@@ -407,6 +410,72 @@ func (m model) detailBody(width int) string {
 				rows = append(rows, line(seg(muted, indent+fmt.Sprintf("… and %d more", len(d.touched)-touchMapShow))))
 			}
 			rows = append(rows, line(seg(muted, indent+"press ")+seg(blue, "f")+seg(muted, " to open or diff these files")))
+		}
+	}
+
+	// Codex - the same footprint for OpenAI Codex sessions, so a repo worked with
+	// both agents shows both, side by side, for cross-referencing.
+	if len(d.codexSessions) > 0 {
+		const labelW = 9
+		label := func(name string) string { return segB(teal, fmt.Sprintf("%s%-*s ", detailSectionIndent, labelW, name)) }
+		indent := fmt.Sprintf("%s%*s ", detailSectionIndent, labelW, "")
+		metricSep := seg(muted, "  ·  ")
+
+		rows = append(rows, blank,
+			line(sectionHeading(codexC, "", "Codex", "")+seg(muted, "   what Codex has done in this repo")))
+
+		var turns, tokens int
+		var last time.Time
+		for _, s := range d.codexSessions {
+			turns += s.Assistant
+			tokens += s.Tokens
+			if s.Modified.After(last) {
+				last = s.Modified
+			}
+		}
+		rows = append(rows, line(label("activity")+
+			seg(ice, fmt.Sprintf("%d sessions", len(d.codexSessions)))+metricSep+
+			seg(ice, fmt.Sprintf("%d turns", turns))+metricSep+
+			seg(ice, fmt.Sprintf("%s tokens", humanTokens(tokens)))+metricSep+
+			seg(ice, fmt.Sprintf("last %s ago", relTime(last)))))
+
+		rows = append(rows, line(label("sessions")+seg(muted, "most recent")))
+		for i, s := range d.codexSessions {
+			if i >= 3 {
+				break
+			}
+			meta := seg(muted, fmt.Sprintf("  %s · %d turns · %s ago", claude.PrettyModel(s.Model), s.Assistant, relTime(s.Modified)))
+			rows = append(rows, line(seg(muted, indent)+seg(ice, fit(s.DisplayTitle(), max(10, width-len(indent)-34)))+meta))
+		}
+
+		if len(d.codexTouched) > 0 {
+			dirty := dirtyPathSet(d.info.StatusLines)
+			shown := d.codexTouched
+			if len(shown) > touchMapShow {
+				shown = shown[:touchMapShow]
+			}
+			uncommitted := 0
+			for _, t := range d.codexTouched {
+				if dirty[t.Path] {
+					uncommitted++
+				}
+			}
+			summary := segB(ice, fmt.Sprintf("%d edited", len(d.codexTouched)))
+			if uncommitted > 0 {
+				summary += seg(yellow, fmt.Sprintf("  ·  %d uncommitted", uncommitted))
+			}
+			rows = append(rows, line(label("files")+summary))
+			for _, t := range shown {
+				tag := ""
+				if dirty[t.Path] {
+					tag = "uncommitted"
+				}
+				rows = append(rows, line(seg(muted, indent)+
+					seg(codexC, "edit ")+
+					renderTouchedPath(t.Path, ice, max(10, width-len(indent)-24))+
+					seg(muted, fmt.Sprintf("  %s ago  ", relTime(t.Last)))+
+					seg(yellow, tag)))
+			}
 		}
 	}
 

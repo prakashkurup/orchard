@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
@@ -38,10 +39,10 @@ func (m model) openTouched(r repo.Repo) (tea.Model, tea.Cmd) {
 	m.touchedLoading = true
 	m.touchedReturn = m.mode
 	m.mode = modeTouched
-	return m, tea.Batch(touchedCmd(r), m.spinner.Tick)
+	return m, tea.Batch(touchedCmd(r, m.assistantIsCodex()), m.spinner.Tick)
 }
 
-func touchedCmd(r repo.Repo) tea.Cmd {
+func touchedCmd(r repo.Repo, useCodex bool) tea.Cmd {
 	if demoMode() {
 		return func() tea.Msg {
 			return touchedMsg{path: r.Path, files: demoTouched(), dirty: dirtyPathSet(demoDetail(r).StatusLines)}
@@ -49,6 +50,9 @@ func touchedCmd(r repo.Repo) tea.Cmd {
 	}
 	return func() tea.Msg {
 		files := claude.TouchMap(r.Path, touchedViewSessions)
+		if useCodex {
+			files = codex.TouchMap(r.Path, touchedViewSessions)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		lines, _ := orchardgit.StatusLines(ctx, r.Path)

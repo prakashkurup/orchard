@@ -85,10 +85,10 @@ func (m model) helpBody(width int) string {
 			{"b", "switch branch"},
 			{"r / w", "refresh now / toggle live refresh (also fetches remotes in the background)"},
 		}},
-		{"CLAUDE CODE", [][2]string{
+		{"AI AGENTS (CLAUDE CODE / CODEX)", [][2]string{
 			{"c / C", "launch / resume last session"},
 			{"H", "browse and resume past sessions"},
-			{"f", "files Claude touched (detail page; open / diff them)"},
+			{"f", "files the agent touched (detail page; open / diff them)"},
 			{"v", "preview CLAUDE.md / AGENTS.md / README (detail page)"},
 			{"A", "one session across selected repos (2+)"},
 			{"M", "draft a commit message in a window"},

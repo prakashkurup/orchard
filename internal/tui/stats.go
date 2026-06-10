@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
@@ -20,6 +21,7 @@ const statsWeeks = 20
 type statsMsg struct {
 	harvest map[string]int // commit day -> count
 	claude  map[string]int // Claude session day -> turns
+	codex   map[string]int // Codex session day -> turns
 }
 
 // openStats opens the in-TUI stats page (reusing the detail viewport for scroll).
@@ -36,8 +38,8 @@ func (m model) openStats() (tea.Model, tea.Cmd) {
 func statsCmd(repos []repo.Repo) tea.Cmd {
 	if demoMode() {
 		return func() tea.Msg {
-			h, c := demoStatsData()
-			return statsMsg{harvest: h, claude: c}
+			h, c, cx := demoStatsData()
+			return statsMsg{harvest: h, claude: c, codex: cx}
 		}
 	}
 	return func() tea.Msg {
@@ -60,7 +62,16 @@ func statsCmd(repos []repo.Repo) tea.Cmd {
 				cl[s.Modified.Format("2006-01-02")] += s.Assistant
 			}
 		}
-		return statsMsg{harvest: harvest, claude: cl}
+		cx := map[string]int{}
+		for _, r := range repos {
+			for _, s := range codex.Sessions(r.Path, 0) {
+				if s.Modified.Before(cutoff) {
+					continue
+				}
+				cx[s.Modified.Format("2006-01-02")] += s.Assistant
+			}
+		}
+		return statsMsg{harvest: harvest, claude: cl, codex: cx}
 	}
 }
 
@@ -184,13 +195,17 @@ func (m model) statsBody(width int) string {
 		rows = append(rows, line(""), line(segB(claudeC, "  Claude Code")+
 			seg(muted, fmt.Sprintf("    %d sessions · %d turns · %s tokens", u.TotalSessions, u.TotalTurns, humanTokens(u.TotalTokens)))))
 	}
+	if u := m.codexUsage; u != nil && u.TotalSessions > 0 {
+		rows = append(rows, line(segB(codexC, "  Codex")+
+			seg(muted, fmt.Sprintf("          %d sessions · %d turns · %s tokens", u.TotalSessions, u.TotalTurns, humanTokens(u.TotalTokens)))))
+	}
 	if days, set := claude.CleanupPeriodDays(); set && days == 0 {
 		rows = append(rows, line(seg(orange, "  ⚠ Claude cleanupPeriodDays=0")+seg(muted, " · sessions auto-delete; raise it to keep your history")))
 	}
 
 	// heatmaps
 	if m.statsLoading {
-		rows = append(rows, line(""), line(seg(muted, "  computing harvest + claude heatmaps…")))
+		rows = append(rows, line(""), line(seg(muted, "  computing harvest + agent heatmaps…")))
 	} else {
 		rows = append(rows, heatGrid("harvest",
 			fmt.Sprintf("%d commits in the last %d weeks", sumMap(m.statsHarvest), statsWeeks),
@@ -198,6 +213,9 @@ func (m model) statsBody(width int) string {
 		rows = append(rows, heatGrid("claude",
 			fmt.Sprintf("%d turns in the last %d weeks", sumMap(m.statsClaude), statsWeeks),
 			m.statsClaude, [3]int{20, 50, 100}, [4]string{"#7A4A1E", "#B5742E", "#E0973F", "#FF9E64"}, width)...)
+		rows = append(rows, heatGrid("codex",
+			fmt.Sprintf("%d turns in the last %d weeks", sumMap(m.statsCodex), statsWeeks),
+			m.statsCodex, [3]int{20, 50, 100}, [4]string{"#14532D", "#15803D", "#16A34A", "#19C37D"}, width)...)
 	}
 	return strings.Join(rows, "\n")
 }
