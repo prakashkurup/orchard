@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // astGrepProvider extracts symbols and edges by shelling out to ast-grep
@@ -49,11 +50,23 @@ func newASTGrep() (astGrepProvider, bool) {
 		}
 	}
 	for _, name := range names {
-		if p, err := exec.LookPath(name); err == nil {
+		// Verify PATH hits really are ast-grep: Linux ships an unrelated sg(1)
+		// (setgroups, from shadow-utils) that would otherwise be picked up and
+		// silently produce empty graphs. The override and managed copies are
+		// trusted (explicit intent / installed by orchard's pinned fetcher).
+		if p, err := exec.LookPath(name); err == nil && isASTGrep(p) {
 			return astGrepProvider{bin: p}, true
 		}
 	}
 	return astGrepProvider{}, false
+}
+
+// isASTGrep reports whether bin identifies itself as ast-grep via --version.
+func isASTGrep(bin string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
+	return err == nil && strings.Contains(strings.ToLower(string(out)), "ast-grep")
 }
 
 func (astGrepProvider) Name() string { return "ast-grep" }

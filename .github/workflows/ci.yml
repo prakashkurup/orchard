@@ -16,6 +16,9 @@ jobs:
           cache: true
       - name: Lint (gofmt + vet)
         run: make lint
+      - name: Install ast-grep (pinned, for the graph parser tests)
+        # best-effort: on failure the ast-grep tests skip instead of failing
+        run: go run . graph install-ast-grep || true
       - name: Test (race)
         run: make test-race
       - name: Build

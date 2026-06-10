@@ -99,8 +99,30 @@ func fakeExecutable(t *testing.T, dir, name string) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	// answers --version like the real ast-grep, so PATH verification accepts it
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho ast-grep 0.0.0-test\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// TestNewASTGrepRejectsImpostorSg pins the Linux footgun: /usr/bin/sg is the
+// unrelated setgroups utility, so a PATH hit that does not identify itself as
+// ast-grep must be rejected rather than silently producing empty graphs.
+func TestNewASTGrepRejectsImpostorSg(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv(astGrepPathEnv, "")
+
+	pathDir := t.TempDir()
+	impostor := filepath.Join(pathDir, "sg")
+	if err := os.WriteFile(impostor, []byte("#!/bin/sh\necho 'usage: sg group command'; exit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", pathDir)
+
+	if ag, ok := newASTGrep(); ok {
+		t.Fatalf("newASTGrep accepted an impostor sg: %q", ag.bin)
+	}
 }
