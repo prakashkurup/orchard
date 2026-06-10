@@ -285,6 +285,7 @@ The `orchard config` **command** doesn't change anything: it prints the resolved
 
 - `ORCHARD_ROOT` - default repo folder.
 - `ORCHARD_CONFIG` - explicit config file path.
+- `ORCHARD_AI_CMD` - explicit agent command for the agent keys (otherwise the first of `claude` / `codex` on `PATH`).
 - `GITHUB_TOKEN` - token for `orchard clone` (falls back to `gh auth token`).
 - `ORCHARD_ADDDIR_MEMORY` - set to `0` to stop a cross-repo Claude session (`A`) from loading the added repos' `CLAUDE.md` (on by default).
 - `ORCHARD_GRAPH_MCP` - set to `0` to disable automatic graph MCP wiring when launching an agent.
@@ -293,6 +294,10 @@ The `orchard config` **command** doesn't change anything: it prints the resolved
 - `ORCHARD_NO_MOUSE` - set to `1` to disable mouse capture (so your terminal's native text selection works).
 - `ORCHARD_FETCH_SECS` - while live refresh is on, how often (seconds) to fetch remotes in the background so ahead/behind stay current. Default `300` (5 min); `0` disables background fetching (fetch on demand with `f` / `F`).
 - `ORCHARD_NO_ANIM` - set to `1` to turn off motion (the launch intro, the row cascade, the count-up, and the "just tended" row pulse).
+- `ORCHARD_IDLE_SECS` - seconds of idle before the petal screensaver wakes (default `600`; `0` disables; `Z` starts it on demand).
+- `ORCHARD_TERMINAL_CMD` - custom new-tab launch template when your terminal is not auto-detected.
+- `ORCHARD_DEMO` - set to `1` to render fictional demo data (for clean screenshots and recordings).
+- `NO_COLOR` - disable colored CLI output ([no-color.org](https://no-color.org)).
 
 ### Advanced config file
 
