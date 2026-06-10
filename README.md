@@ -1,6 +1,6 @@
 # orchard
 
-An agent-aware, multi-repo terminal dashboard. See every local git repo on one screen (branch, dirty / ahead / behind, language, last commit) plus what your AI coding agent did across them: where Claude Code ran, the files it touched, and a flag when there is uncommitted AI work. Then pull, fetch, switch branches, search, diff, or open any repo in your editor, browser, or Claude Code, all from the keyboard.
+An agent-aware, multi-repo terminal dashboard. See every local git repo on one screen (branch, dirty / ahead / behind, language, last commit) plus what your AI coding agents did across them: where Claude Code and Codex ran, the files they touched, and a flag when there is uncommitted AI work. Then pull, fetch, switch branches, search, diff, or open any repo in your editor, browser, or agent, all from the keyboard.
 
 ![orchard demo](docs/screenshots/demo.gif)
 
@@ -14,7 +14,7 @@ An agent-aware, multi-repo terminal dashboard. See every local git repo on one s
 - **Optional:**
   - A [Nerd Font](https://www.nerdfonts.com/) for the icons (any other monospace font works; icons just render as boxes).
   - [`gh`](https://cli.github.com/) (GitHub CLI) - used by `orchard clone --org` for auth if `GITHUB_TOKEN` isn't set.
-  - [`claude`](https://claude.com/claude-code) - for the `c` key (launch Claude Code) and the usage panel.
+  - [`claude`](https://claude.com/claude-code) and/or [`codex`](https://developers.openai.com/codex/cli) - for the agent keys (`c`, `C`, `H`, `R`, `A`, `M`); activity always shows from local history either way.
   - [`ast-grep`](https://ast-grep.github.io/) - optional parser backend for Kotlin, TypeScript/TSX, Ruby, C#, Python, JavaScript, C, and C++; orchard can install a pinned copy with `orchard graph install-ast-grep`.
   - A supported terminal for new-tab launches: Ghostty, iTerm2, WezTerm, tmux, or macOS Terminal (otherwise it falls back to running in place).
 
@@ -47,7 +47,7 @@ go install github.com/prakashkurup/orchard@latest
 git clone https://github.com/prakashkurup/orchard.git
 cd orchard
 make build       # produces ./orchard (version stamped from git tags)
-make install     # installs into $(go env GOPATH)/bin
+make install     # installs into ~/.local/bin (override with PREFIX=...)
 ```
 
 ### Updating
@@ -77,25 +77,25 @@ The root defaults to your **current directory**, so `cd ~/code && orchard` just 
 
 ## Why orchard
 
-Most tools either manage many repos or inspect AI assistant history. orchard combines both: an interactive multi-repo git dashboard that knows where you have been running Claude Code, launches it in any repo, and searches code across every repo at once.
+Most tools either manage many repos or inspect AI assistant history. orchard combines both: an interactive multi-repo git dashboard that knows where you have been running Claude Code and Codex, launches either in any repo, and searches code across every repo at once.
 
-If you know the space, `gita`, `mani`, `gitpane`, `git-dash`, and `git-scope` cover multi-repo git workflows; `ccusage` and `claude-history` cover Claude usage and history. orchard puts the local repo dashboard and Claude-aware workflow in the same window.
+If you know the space, `gita`, `mani`, `gitpane`, `git-dash`, and `git-scope` cover multi-repo git workflows; `ccusage` and `claude-history` cover Claude usage and history. orchard puts the local repo dashboard and the agent-aware workflow in the same window.
 
-If you juggle many repositories and lean on Claude Code, orchard is the cockpit for that workflow. If you only ever work in one repo at a time, a single-repo TUI like `lazygit` will serve you better.
+If you juggle many repositories and lean on Claude Code or Codex, orchard is the cockpit for that workflow. If you only ever work in one repo at a time, a single-repo TUI like `lazygit` will serve you better.
 
 ## Features
 
 - **One-screen overview** of every repo: branch, clean/dirty/ahead/behind/diverged/detached, uncommitted + stash counts, dominant language, last-synced and last-commit times (color-coded by freshness).
+- **Agent aware (Claude Code + Codex)** - usage panel, a per-repo `AGENT` column marking each agent that ran, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code & Codex](#claude-code--codex) below.
+- **Code graph for agents** - build a SQLite symbol/call graph (`B` or `orchard graph build`) and serve it to Claude Code or Codex over MCP, including cross-repo sessions. See [Code Graph & MCP](#code-graph--mcp).
 - **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, and repos with no upstream (a non-fast-forward is reported, never forced).
-- **Preview docs** (`v`) - render a repo's `CLAUDE.md` / `AGENTS.md` / `README.md` in the terminal, with its size and an estimated per-session token cost.
 - **Fetch, branch switch, multi-select** - act on one repo or many at once.
-- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or **Claude Code** (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
+- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or your agent (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
 - **Cross-repo code search** (`S`) that respects `.gitignore`.
-- **Code graph for agents** - build a SQLite symbol/call graph (`B` or `orchard graph build`) and serve it to Claude Code or Codex over MCP, including cross-repo sessions.
+- **Preview docs** (`v`) - render a repo's `CLAUDE.md` / `AGENTS.md` / `README.md` in the terminal, with its size and an estimated per-session token cost.
 - **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
 - **Worklog** (`L`) - your own commits across all repos in a time window.
 - **Clone** (`+`) a new repo into the dashboard, or `orchard clone` a scoped GitHub org.
-- **Agent aware (Claude Code + Codex)** - usage panel, a per-repo AGENT column marking each agent that ran, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code & Codex](#claude-code--codex) below.
 - **Scriptable CLI** - `scan`, `pull`, `clone` with `--json` for cron and pipelines.
 
 ## Claude Code & Codex
@@ -106,14 +106,14 @@ The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set,
 
 ### See activity
 
-- **Usage panel** pinned under the list: total sessions, turns, repos used, last active, a model split, and your busiest repos.
-- **Per-repo CLAUDE column**: how long ago Claude last ran in each repo, colored by recency.
-- **Active now**: a session writing in the last ~60s shows `● live` (green); if that repo is also dirty it shows `!live` (red), so live AI work on an uncommitted tree stands out.
-- **Per-repo footprint in the detail view** (`enter`): that repo's recent sessions, total turns and tokens, and when Claude last ran there.
-- **Files Claude touched** (detail view): the files Claude read or edited here, edited-first, with files it changed but hasn't committed flagged. Press `f` for the full list, then `enter` to open one in your editor or `d` to diff just that file.
-- **Uncommitted-work flag**: when a repo is dirty *and* Claude ran there recently, the CLAUDE cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
-- **Sort by Claude** (`s`): float the most recently Claude-worked repos to the top.
-- **Usage**: per-repo token totals in the panel and session picker; `orchard stats` shows total sessions, turns, tokens, and a Claude activity heatmap alongside the commit harvest.
+- **Usage panel** pinned under the list: per-agent totals (sessions, turns, tokens, repos used, last active), a model split, and your busiest repos.
+- **Per-repo `AGENT` column**: a mark for each agent that ran in the repo (both when you used both), with the freshest run age colored by recency.
+- **Active now**: a session writing in the last ~60s shows `live` (green); if that repo is also dirty it shows `!live` (red), so live AI work on an uncommitted tree stands out.
+- **Per-repo footprint in the detail view** (`enter`): each agent's recent sessions, turns, tokens, and last run, side by side when both have worked the repo.
+- **Files the agent touched** (detail view): what it read or edited here, edited-first, with files it changed but hasn't committed flagged. Press `f` for the full list, then `enter` to open one in your editor or `d` to diff just that file.
+- **Uncommitted-work flag**: when a repo is dirty *and* an agent ran there recently, the `AGENT` cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
+- **Sort by agent** (`s`): float the most recently agent-worked repos to the top.
+- **Stats** (`T` / `orchard stats`): totals per agent, plus Claude and Codex activity heatmaps alongside the commit harvest.
 
 ![the repo detail view: languages, the Claude Code section (activity, context, recent sessions, and the files Claude touched), GitHub PRs, the working tree, and the commit graph](docs/screenshots/details.png)
 
@@ -121,21 +121,21 @@ The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set,
 
 ### Resume and search sessions
 
-- **Resume** (`C`): continue the most recent session in the current repo (`claude --continue`).
-- **Session history** (`H`): browse a repo's past sessions by their titles (turn count, model, age) and resume any one (`claude --resume <id>`).
-- **Search past sessions** (`R`): search the *content* of every repo's Claude sessions at once and resume the match in its own repo. For deep semantic search and a full conversation viewer, the dedicated [`claude-history`](https://github.com/raine/claude-history) is excellent; orchard's `R` is a quick cross-repo find-and-resume without leaving the dashboard.
+- **Resume** (`C`): continue the most recent session in the current repo (`claude --continue` / `codex resume --last`).
+- **Session history** (`H`): browse a repo's past sessions by their titles (turn count, model, age) and resume any one (`claude --resume <id>` / `codex resume <id>`).
+- **Search past sessions** (`R`): search the *content* of every repo's sessions at once and resume the match in its own repo. For deep semantic search and a full conversation viewer, the dedicated [`claude-history`](https://github.com/raine/claude-history) is excellent; orchard's `R` is a quick cross-repo find-and-resume without leaving the dashboard.
 
-### Launch Claude across repos
+### Launch across repos
 
-- **Launch** (`c`): open Claude Code in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
-- **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. Each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
+- **Launch** (`c`): open the agent in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
+- **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. With Claude Code, each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
 - **Workspace presets** (`W`): save a `space`-selected repo set under a name, then launch the cross-repo `A` session on it in one keystroke, for the groups of services you keep working on together. Stored in `presets.json` (see [Files orchard writes](#files-orchard-writes)).
 
 ![workspace presets (`W`): save a selected repo set and launch a cross-repo session on it](docs/screenshots/presets.png)
 
 ### Draft commit messages
 
-- **Draft a commit message** (`M`): Claude Code drafts a message from the working-tree diff *headlessly* (`claude -p`) and shows it in a window you can copy (`y`) or regenerate (`r`), without leaving the dashboard. Other assistants fall back to a terminal session.
+- **Draft a commit message** (`M`): the agent drafts a message from the working-tree diff *headlessly* (`claude -p`, or `codex exec` in a read-only sandbox) and shows it in a window you can copy (`y`) or regenerate (`r`), without leaving the dashboard. Other assistants fall back to a terminal session.
 
 ![drafting a commit message with Claude (`M`): the message appears in a window to copy or regenerate](docs/screenshots/commit.png)
 
@@ -143,22 +143,18 @@ The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set,
 
 - **Instructions health** (detail view + the `needs-md` filter): shows which repos have a `CLAUDE.md` / `AGENTS.md`, and flags repos where Claude runs with no project context, either no `CLAUDE.md` at all, or an `AGENTS.md` Claude won't read (Claude Code doesn't load `AGENTS.md` natively). `I` wires the latter up by creating a `CLAUDE.md` that imports `@AGENTS.md` (only where there's no `CLAUDE.md` yet; it never edits an existing one).
 
-### Adapt to your setup
-
-- **Adaptive**: launches `$ORCHARD_AI_CMD` if set, otherwise the first of `claude` or `codex` found on your `PATH`.
-
 ### Codex parity
 
 When Codex is the resolved assistant, the same keys drive it: `C` resumes the last session (`codex resume --last`), `H` browses and resumes past sessions, `R` searches session content, `f` lists the files it edited, `A` spans repos via `--add-dir`, and `M` drafts a commit message headlessly (`codex exec` in a read-only sandbox). Codex activity always shows regardless of which assistant launches: the `AGENT` column, the usage panel, the detail footprint, and the stats heatmaps read both agents' local history.
 
-### Claude Code panel or column empty?
+### Panel or AGENT column empty?
 
-The usage panel and CLAUDE column reflect repos you have **actually run Claude Code in** (as the working directory), not just that Claude is installed. If they look empty:
+The usage panel and `AGENT` column reflect repos you have **actually run an agent in** (as the working directory), not just that one is installed. If they look empty:
 
-- **Use Claude in a repo first.** Run `claude` inside one of the repos once; the panel and column fill from past sessions, not from installation.
-- **Point orchard at the right root.** They only cover repos under orchard's root, so set `--root` / `ORCHARD_ROOT` to where you actually work with Claude.
-- **Relocated config?** orchard reads `~/.claude`, or `$CLAUDE_CONFIG_DIR` when you have moved Claude's config there.
-- **The `c` launcher is missing?** orchard needs `claude` on your `PATH` (a shell alias or function does not count) or `ORCHARD_AI_CMD=/full/path/to/claude`. GUI launches often have a thinner `PATH` than your terminal.
+- **Use an agent in a repo first.** Run `claude` or `codex` inside one of the repos once; the panel and column fill from past sessions, not from installation.
+- **Point orchard at the right root.** They only cover repos under orchard's root, so set `--root` / `ORCHARD_ROOT` to where you actually work.
+- **Relocated config?** orchard reads `~/.claude` (or `$CLAUDE_CONFIG_DIR`) and `~/.codex` (or `$CODEX_HOME`).
+- **The `c` launcher is missing?** orchard needs `claude` or `codex` on your `PATH` (a shell alias or function does not count) or `ORCHARD_AI_CMD=/full/path/to/the/binary`. GUI launches often have a thinner `PATH` than your terminal.
 
 ## Code Graph & MCP
 
@@ -195,7 +191,7 @@ Press `?` in-app for the same keymap and legend.
 
 | Key | Action |
 |-----|--------|
-| `enter` | repo detail (languages, instructions, GitHub PR/CI, Claude footprint, working tree, commit graph, remotes) |
+| `enter` | repo detail (languages, instructions, code graph, GitHub PR/CI, agent footprints, working tree, commit graph, remotes) |
 | `d` | view the working-tree diff (vs HEAD) |
 | `p` / `P` | pull selected / all (fast-forward only) |
 | `f` / `F` | fetch selected / all |
@@ -208,12 +204,12 @@ Press `?` in-app for the same keymap and legend.
 
 | Key | Action |
 |-----|--------|
-| `c` | open Claude Code in a new tab (confirms for >1 repo) |
-| `C` | resume the last Claude Code session in the current repo |
-| `H` | browse past Claude Code sessions for the current repo and resume any one |
-| `R` | search the *content* of past Claude Code sessions across all repos, then resume one |
-| `A` | one Claude Code session across the selected repos: opens in the first selected, the rest attached via `--add-dir` (`space`-select 2+ first) |
-| `M` | draft a commit message (Claude Code drafts it in a window to copy / regenerate) |
+| `c` | open the agent (Claude Code / Codex) in a new tab (confirms for >1 repo) |
+| `C` | resume the agent's last session in the current repo |
+| `H` | browse the agent's past sessions for the current repo and resume any one |
+| `R` | search the *content* of past sessions across all repos, then resume one |
+| `A` | one session across the selected repos: opens in the first selected, the rest attached via `--add-dir` (`space`-select 2+ first) |
+| `M` | draft a commit message headlessly (shown in a window to copy / regenerate) |
 | `I` | wire `AGENTS.md` into a new `CLAUDE.md` for the selected repos (so Claude reads it) |
 | `W` | workspace presets: save a repo set, then launch a cross-repo session (`A`) on it |
 | `v` | preview a repo's `CLAUDE.md` / `AGENTS.md` / `README.md`, rendered, with size and est. token cost |
@@ -232,7 +228,7 @@ Press `?` in-app for the same keymap and legend.
 |-----|--------|
 | `S` | search code across all repos |
 | `L` | worklog - your commits across repos |
-| `T` | stats page (languages, freshest/thirstiest, Claude usage, harvest + Claude heatmaps) |
+| `T` | stats page (languages, freshest/thirstiest, per-agent usage, harvest + agent heatmaps) |
 | `/` | filter by text, or a `branch:` / `name:` prefix |
 | `tab` | cycle quick filters (attention, dirty, behind, feature, at-risk, ai-touched, needs-md) |
 | `s` / `o` | cycle sort (attention / name / synced / agent) / toggle grouping |
@@ -296,7 +292,7 @@ The `orchard config` **command** doesn't change anything: it prints the resolved
 - `ORCHARD_NO_UPDATE_CHECK` - set to `1` to disable the daily check for a newer release.
 - `ORCHARD_NO_MOUSE` - set to `1` to disable mouse capture (so your terminal's native text selection works).
 - `ORCHARD_FETCH_SECS` - while live refresh is on, how often (seconds) to fetch remotes in the background so ahead/behind stay current. Default `300` (5 min); `0` disables background fetching (fetch on demand with `f` / `F`).
-- `ORCHARD_NO_ANIM` - set to `1` to turn off motion (the launch intro, the count-up, eased scrolling, and the "just tended" row pulse).
+- `ORCHARD_NO_ANIM` - set to `1` to turn off motion (the launch intro, the row cascade, the count-up, and the "just tended" row pulse).
 
 ### Advanced config file
 
@@ -331,7 +327,7 @@ orchard runs locally with no telemetry. Network traffic only happens when you as
 - `git` talking to your remotes (fetch / pull / clone).
 - the **GitHub API** for open-PR and CI status, and for `orchard clone`.
 - `orchard graph install-ast-grep`, which downloads a pinned ast-grep release zip from GitHub, verifies its SHA-256, and stores the binary locally.
-- **Claude Code**, when you launch it (`c` / `C` / `H` / `A`) or draft a commit message (`M`, which runs `claude -p` and sends the working-tree diff to Claude). The usage panel, CLAUDE column, and stats only **read** your local `~/.claude` transcripts - nothing is sent for those.
+- **your agent (Claude Code / Codex)**, when you launch it (`c` / `C` / `H` / `A`) or draft a commit message (`M`, which runs `claude -p` or `codex exec` and sends the working-tree diff to the agent). The usage panel, `AGENT` column, and stats only **read** your local `~/.claude` transcripts and `~/.codex` rollouts - nothing is sent for those.
 - the **update check** - one anonymous request to the GitHub releases API, at most once a day (disable with `ORCHARD_NO_UPDATE_CHECK=1`).
 
 Privacy details:
