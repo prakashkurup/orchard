@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
+	"github.com/prakashkurup/orchard/internal/graph"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"strconv"
@@ -34,7 +35,29 @@ type detailState struct {
 	sessions     []claude.Session     // recent Claude Code sessions in this repo
 	commitsSince int                  // commits since Claude last ran here (stale-context hint)
 	touched      []claude.TouchedFile // files Claude read/edited here (touch map)
+	graph        graph.GraphState     // code-graph snapshot (zero when graphOK is false)
+	graphOK      bool                 // a non-empty code graph has been built
+	graphMap     []graph.MapRow       // top-ranked symbols (repo map), for the detail view
 	err          string
+}
+
+// loadGraph reads the code-graph snapshot and top symbols for a repo (read-only;
+// builds nothing). Returns the state, ok, and the repo map.
+func loadGraph(repoAbs string) (graph.GraphState, bool, []graph.MapRow) {
+	st, ok := graph.StateFor(repoAbs)
+	if !ok {
+		return graph.GraphState{}, false, nil
+	}
+	var top []graph.MapRow
+	if g, err := graph.OpenForRepo(repoAbs); err == nil {
+		top, _ = g.RepoMap(6)
+		if stale, changed, err := g.Stale(context.Background(), repoAbs); err == nil {
+			st.Stale = stale
+			st.Changed = changed
+		}
+		g.Close()
+	}
+	return st, true, top
 }
 
 func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -80,6 +103,27 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openEditor(m.repoByPath(m.detailRepo), false)
 	case "E":
 		return m.openEditor(m.repoByPath(m.detailRepo), true)
+	case "B":
+		nm, cmd := m.startGraphBuild([]repo.Repo{m.repoByPath(m.detailRepo)})
+		nm.setDetailContent() // show "building code graph…" in the section immediately
+		return nm, cmd
+	case "D":
+		nm, cmd := m.deleteGraph([]repo.Repo{m.repoByPath(m.detailRepo)})
+		if nm.detail != nil {
+			nm.detail.graph, nm.detail.graphOK, nm.detail.graphMap = loadGraph(nm.detailRepo)
+			nm.setDetailContent() // section reverts to "not built"
+		}
+		return nm, cmd
+	case "m":
+		return m.toggleGraphWiring()
+	case "T":
+		return m.openStats()
+	case "L":
+		return m.openWorklog()
+	case "R":
+		return m.openSessionSearch()
+	case "S":
+		return m.openSearch()
 	case "?":
 		return m.openHelp()
 	}
@@ -110,7 +154,8 @@ func detailCmd(r repo.Repo) tea.Cmd {
 		defer cancel()
 		info, err := orchardgit.Detail(ctx, r)
 		sessions := claude.Sessions(r.Path, 10)
-		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, r.Path, sessions), touched: claude.TouchMap(r.Path, touchMapSessions), err: err}
+		gst, gok, gmap := loadGraph(r.Path)
+		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, r.Path, sessions), touched: claude.TouchMap(r.Path, touchMapSessions), graph: gst, graphOK: gok, graphMap: gmap, err: err}
 	}
 }
 
@@ -181,10 +226,69 @@ func (m model) detailBody(width int) string {
 		rows = append(rows, line(sectionHeading(blue, iconCommit, "Languages", "")), line(parts))
 	}
 
+	instr, hasInstr := m.instructionsByPath[m.detailRepo]
+	rows = append(rows, m.aiReadinessRows(d, instr, hasInstr, width, line, sectionHeading)...)
+
+	// Code graph - the queryable symbol/edge graph orchard serves to Claude/Codex
+	// over MCP (build or refresh with B); fresh means built at the current HEAD on
+	// a clean tree, stale means HEAD moved or the tree is dirty.
+	{
+		sep := seg(muted, "  ·  ")
+		rows = append(rows, blank, line(sectionHeading(blue, iconCommit, "Code graph", "")))
+		switch {
+		case m.graphBuilding && m.graphBuildingPath == d.repo.Path:
+			rows = append(rows, line(seg(accent, detailSectionIndent+m.spinner.View()+" building code graph…")))
+		case !d.graphOK:
+			rows = append(rows, line(seg(muted, detailSectionIndent+"not built — press ")+seg(blue, "B")+seg(muted, " to build (served to Claude / Codex over MCP)")))
+			if nudge := graphSetupNudge(d); nudge != "" {
+				rows = append(rows, line(seg(muted, detailSectionIndent)+seg(yellow, nudge)))
+			}
+		default:
+			g := d.graph
+			reasons := graphStaleReasons(d)
+			stale := len(reasons) > 0
+			freshTag := segB(green, "● fresh")
+			if stale {
+				freshTag = segB(yellow, "◐ "+strings.Join(reasons, " · "))
+			}
+			rows = append(rows, line(seg(muted, detailSectionIndent)+
+				seg(ice, fmt.Sprintf("%d files", g.Files))+sep+
+				seg(ice, fmt.Sprintf("%d symbols", g.Symbols))+sep+
+				seg(ice, fmt.Sprintf("%d edges", g.Edges))))
+			if trust := graphTrustSummary(g.Trust); trust != "" {
+				rows = append(rows, line(seg(muted, detailSectionIndent+"trust ")+seg(ice, trust)))
+			} else if quality := graphQualitySummary(g.Tiers); quality != "" {
+				rows = append(rows, line(seg(muted, detailSectionIndent+"trust ")+seg(ice, quality)))
+			}
+			if nudge := graphSetupNudge(d); nudge != "" {
+				rows = append(rows, line(seg(muted, detailSectionIndent)+seg(yellow, nudge)))
+			}
+			meta := seg(muted, detailSectionIndent) + freshTag
+			if !g.BuiltAt.IsZero() {
+				meta += seg(muted, fmt.Sprintf("   built %s ago", relTime(g.BuiltAt)))
+			}
+			if len(g.HeadCommit) >= 7 {
+				meta += seg(muted, "   @ "+g.HeadCommit[:7])
+			}
+			rows = append(rows, line(meta))
+			if stale {
+				rows = append(rows, line(seg(muted, detailSectionIndent+"press ")+seg(blue, "B")+seg(muted, " to rebuild at the current HEAD")))
+			}
+			if len(d.graphMap) > 0 {
+				rows = append(rows, line(seg(muted, detailSectionIndent+"top symbols")))
+				for _, e := range d.graphMap {
+					rows = append(rows, line(seg(muted, detailSectionIndent+"  ")+
+						seg(teal, fmt.Sprintf("%-6s", e.Kind))+
+						seg(ice, " "+e.Name)+
+						seg(muted, "  "+fit(e.Path, max(10, width-len(detailSectionIndent)-30)))))
+				}
+			}
+		}
+	}
+
 	// Claude Code - everything about the agent in one place, laid out as labeled
 	// rows (activity / context / sessions / files) with whitespace between the
 	// clusters, so a newcomer can scan what each line means and what to act on.
-	instr, hasInstr := m.instructionsByPath[m.detailRepo]
 	if len(d.sessions) > 0 || hasInstr {
 		const labelW = 9
 		label := func(name string) string { return segB(teal, fmt.Sprintf("%s%-*s ", detailSectionIndent, labelW, name)) }
@@ -374,6 +478,207 @@ func (m model) detailBody(width int) string {
 	return strings.Join(rows, "\n")
 }
 
+type aiReadyLevel uint8
+
+const (
+	aiReadyOK aiReadyLevel = iota
+	aiReadyWarn
+	aiReadyBlock
+)
+
+type aiReadyCard struct {
+	level   aiReadyLevel
+	label   string
+	signals []string
+	fixes   []string
+}
+
+func (m model) aiReadinessRows(d *detailState, instr instrState, instrKnown bool, width int, line func(string) string, heading func(string, string, string, string) string) []string {
+	card := m.aiReadyCard(d, instr, instrKnown)
+	color := aiReadyColor(card.level)
+	indent := detailSectionIndent
+	contentW := max(10, width-lipgloss.Width(indent))
+
+	rows := []string{
+		line(""),
+		line(heading(color, "", "AI readiness", "   "+aiReadyBadge(card.level)+" "+card.label)),
+		line(seg(muted, indent) + seg(ice, fit(strings.Join(card.signals, "  ·  "), contentW))),
+	}
+	if len(card.fixes) == 0 {
+		rows = append(rows, line(seg(muted, indent+"next ")+seg(green, "launch safely with c")))
+		return rows
+	}
+	for i, fix := range card.fixes {
+		if i >= 4 {
+			rows = append(rows, line(seg(muted, indent+"next ")+seg(yellow, fmt.Sprintf("and %d more checks", len(card.fixes)-i))))
+			break
+		}
+		rows = append(rows, line(seg(muted, indent+"next ")+seg(yellow, fit(fix, contentW-5))))
+	}
+	return rows
+}
+
+func (m model) aiReadyCard(d *detailState, instr instrState, instrKnown bool) aiReadyCard {
+	card := aiReadyCard{level: aiReadyOK, label: "ready to launch"}
+	add := func(signal string) { card.signals = append(card.signals, signal) }
+	fix := func(level aiReadyLevel, signal, action string) {
+		add(signal)
+		card.fixes = append(card.fixes, action)
+		if level > card.level {
+			card.level = level
+		}
+	}
+
+	switch {
+	case m.graphBuilding && m.graphBuildingPath == d.repo.Path:
+		fix(aiReadyWarn, "graph building", "wait for graph build to finish")
+	case !d.graphOK:
+		fix(aiReadyWarn, "graph never built", "press B to build the code graph")
+	case len(graphStaleReasons(d)) == 0:
+		add("graph fresh")
+	default:
+		reasons := strings.Join(graphStaleReasons(d), " · ")
+		fix(aiReadyWarn, "graph "+reasons, "press B to rebuild at the current HEAD")
+	}
+
+	if d.graphOK {
+		add("trust " + graphTrustForReadiness(d.graph))
+	} else {
+		add("trust pending")
+	}
+	if nudge := graphSetupNudge(d); nudge != "" {
+		fix(aiReadyWarn, "ast-grep missing", nudge)
+	}
+
+	switch {
+	case m.assistantCmd == "":
+		fix(aiReadyBlock, "MCP unavailable", "install Claude/Codex or set ORCHARD_AI_CMD")
+	case m.assistantIsClaude() || m.assistantIsCodex():
+		name := m.assistantLabel
+		if name == "" {
+			name = "agent"
+		}
+		if m.graphWireSuppressed() {
+			fix(aiReadyWarn, "MCP wiring off", "press m to enable graph MCP wiring")
+		} else {
+			add("MCP auto-wires " + name)
+		}
+	default:
+		name := m.assistantLabel
+		if name == "" {
+			name = "assistant"
+		}
+		fix(aiReadyWarn, "MCP not supported by "+name, "use Claude or Codex for graph-aware launches")
+	}
+
+	switch {
+	case !instrKnown:
+		add("context checking")
+	case instr.canWire():
+		fix(aiReadyWarn, "AGENTS.md not loaded", "press I to create CLAUDE.md importing @AGENTS.md")
+	case instr.hasClaude && instr.hasAgents && !instr.imports:
+		fix(aiReadyWarn, "AGENTS.md not loaded", "add @AGENTS.md to CLAUDE.md")
+	case instr.blind():
+		fix(aiReadyWarn, "no project notes", "add CLAUDE.md or AGENTS.md before launching")
+	case instr.claudeBytes > claudeMDLargeBytes:
+		fix(aiReadyWarn, "context large", "trim or split CLAUDE.md to reduce launch context")
+	default:
+		add("context ready")
+	}
+	if d.commitsSince >= staleCommitThreshold {
+		fix(aiReadyWarn, "session context old", fmt.Sprintf("review %d commits since Claude last ran", d.commitsSince))
+	}
+
+	if n := dirtyAITouchedCount(d); n > 0 {
+		fix(aiReadyWarn, fmt.Sprintf("%d AI edit%s uncommitted", n, pluralSuffix(n)), "review or commit Claude-edited dirty files")
+	} else if len(d.touched) > 0 {
+		add("AI edits clean")
+	} else {
+		add("AI edits none")
+	}
+
+	if card.level == aiReadyWarn {
+		card.label = "needs attention"
+	} else if card.level == aiReadyBlock {
+		card.label = "blocked"
+	}
+	return card
+}
+
+func graphStaleReasons(d *detailState) []string {
+	if !d.graphOK {
+		return []string{"never built"}
+	}
+	var reasons []string
+	if d.graph.HeadCommit != "" && d.repo.Head != "" && d.graph.HeadCommit != d.repo.Head {
+		reasons = append(reasons, "HEAD moved")
+	}
+	if d.repo.Dirty {
+		reasons = append(reasons, "dirty tree")
+	} else if d.graph.DirtyFiles > 0 {
+		reasons = append(reasons, "built from dirty tree")
+	}
+	if d.graph.Changed > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d file%s changed", d.graph.Changed, pluralSuffix(d.graph.Changed)))
+	} else if d.graph.Stale {
+		reasons = append(reasons, "files changed")
+	}
+	return reasons
+}
+
+func dirtyAITouchedCount(d *detailState) int {
+	dirty := dirtyPathSet(d.info.StatusLines)
+	var n int
+	for _, t := range d.touched {
+		if t.Wrote() && dirty[t.Path] {
+			n++
+		}
+	}
+	return n
+}
+
+func graphTrustForReadiness(st graph.GraphState) string {
+	if s := graphTrustSummary(st.Trust); s != "" {
+		return s
+	}
+	if s := graphQualitySummary(st.Tiers); s != "" {
+		return s
+	}
+	return "unknown"
+}
+
+func graphSetupNudge(d *detailState) string {
+	if graph.ASTGrepAvailable() || !repoNeedsASTGrep(d.langs) {
+		return ""
+	}
+	if repoHasLang(d.langs, "Go") {
+		return "ast-grep missing · press B to build Go only · run orchard graph install-ast-grep for full graph"
+	}
+	return "ast-grep missing · run orchard graph install-ast-grep for full graph"
+}
+
+func aiReadyColor(level aiReadyLevel) string {
+	switch level {
+	case aiReadyBlock:
+		return red
+	case aiReadyWarn:
+		return yellow
+	default:
+		return green
+	}
+}
+
+func aiReadyBadge(level aiReadyLevel) string {
+	switch level {
+	case aiReadyBlock:
+		return "×"
+	case aiReadyWarn:
+		return "◐"
+	default:
+		return "●"
+	}
+}
+
 // contextStatusValue describes which instruction files the agent loads here, as
 // the value for the detail page's "context" label (no leading label of its own).
 func contextStatusValue(instr instrState) string {
@@ -389,6 +694,97 @@ func contextStatusValue(instr instrState) string {
 	default:
 		return segB(yellow, "none") + seg(muted, " · no CLAUDE.md or AGENTS.md")
 	}
+}
+
+func graphQualitySummary(tiers map[graph.Tier]int) string {
+	if len(tiers) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, tier := range []graph.Tier{graph.TierPrecise, graph.TierGood, graph.TierBestEffort, graph.TierUnsupported} {
+		if n := tiers[tier]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", tier, n))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func graphTrustSummary(trust []graph.LangTrust) string {
+	if len(trust) == 0 {
+		return ""
+	}
+	shown := trust
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	parts := make([]string, 0, len(shown)+1)
+	for _, t := range shown {
+		parts = append(parts, fmt.Sprintf("%s: %s", displayGraphLang(t.Lang), t.Tier))
+	}
+	if len(trust) > len(shown) {
+		parts = append(parts, fmt.Sprintf("+%d more", len(trust)-len(shown)))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func displayGraphLang(lang string) string {
+	switch lang {
+	case "go":
+		return "Go"
+	case "python":
+		return "Python"
+	case "ruby":
+		return "Ruby"
+	case "java":
+		return "Java"
+	case "kotlin":
+		return "Kotlin"
+	case "csharp":
+		return "C#"
+	case "typescript", "tsx":
+		return "TypeScript"
+	case "javascript":
+		return "JavaScript"
+	case "c":
+		return "C"
+	case "cpp":
+		return "C++"
+	default:
+		return lang
+	}
+}
+
+func repoNeedsASTGrep(langs []lang.Stat) bool {
+	for _, l := range langs {
+		if graph.ASTGrepSupports(graphLangLabel(l.Name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func graphLangLabel(name string) string {
+	switch name {
+	case "C#":
+		return "csharp"
+	case "C++":
+		return "cpp"
+	case "TypeScript":
+		return "typescript"
+	case "JavaScript":
+		return "javascript"
+	default:
+		return strings.ToLower(name)
+	}
+}
+
+func repoHasLang(langs []lang.Stat, name string) bool {
+	for _, l := range langs {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func compactTouchedPath(path string) string {
@@ -620,7 +1016,11 @@ func (m model) detailView(width int) string {
 		m.detailVP.View(),
 		rule,
 	}
-	if m.status != "" {
+	if m.graphBuilding {
+		spin := lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Background(lipgloss.Color(bg)).Bold(true).
+			Render("  " + m.spinner.View() + " " + m.status)
+		rows = append(rows, fillLine(spin, width, bg))
+	} else if m.status != "" {
 		rows = append(rows, fillLine(statusStyle.Render("  "+m.status), width, bg))
 	}
 	rows = append(rows, hints)

@@ -9,9 +9,12 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -20,7 +23,9 @@ import (
 	"github.com/prakashkurup/orchard/internal/config"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	orchardgithub "github.com/prakashkurup/orchard/internal/github"
+	"github.com/prakashkurup/orchard/internal/graph"
 	"github.com/prakashkurup/orchard/internal/lang"
+	"github.com/prakashkurup/orchard/internal/mcp"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/tui"
 	"github.com/prakashkurup/orchard/internal/update"
@@ -114,6 +119,10 @@ func run(args []string) error {
 		return runPull(args[1:], cfg)
 	case "stats":
 		return runStats(args[1:], cfg)
+	case "graph":
+		return runGraph(args[1:])
+	case "mcp":
+		return runMCP(args[1:])
 	case "update":
 		return runUpdate()
 	default:
@@ -248,6 +257,8 @@ Usage:
   orchard [--config PATH] preview [flags]  render the dashboard once
   orchard [--config PATH] config           show resolved configuration
   orchard [--config PATH] stats            summarize the orchard
+  orchard graph <subcommand> [flags]       build/query a repo code graph
+  orchard mcp [--repo PATH ...]            serve code graphs to AI agents
   orchard update                           update orchard to the latest release
   orchard version                          print the version
 
@@ -261,7 +272,256 @@ Examples:
   orchard preview
   orchard scan --root ~/Documents/GitHub
   orchard pull --root ~/Documents/GitHub --all
-  orchard clone --root ~/Documents/GitHub --org my-org --match '^service-'`)
+  orchard clone --root ~/Documents/GitHub --org my-org --match '^service-'
+  orchard graph build --repo ./my-service
+  orchard mcp --repo ./api --repo ./worker`)
+}
+
+// resolveRepo turns a --repo flag (or the current directory when empty) into an
+// absolute path.
+func resolveRepo(flagVal string) (string, error) {
+	if flagVal == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		flagVal = wd
+	}
+	return filepath.Abs(flagVal)
+}
+
+// runGraph implements `orchard graph <build|status|map|find|callers|blast|search>`.
+// The code graph for a repo is stored under orchard's config dir and queried
+// locally. Flags may come before or after the positional name, e.g. both
+// `graph callers Login --repo X` and `graph callers --repo X Login` work.
+func runGraph(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: orchard graph <build|delete|status|map|find|callers|blast|search|install-ast-grep> [--repo PATH] [-n N] [name]")
+	}
+	sub, rest := args[0], args[1:]
+	if sub == "install-ast-grep" {
+		path, err := graph.InstallASTGrep(context.Background())
+		if err != nil {
+			return err
+		}
+		fmt.Println("installed ast-grep →", path)
+		return nil
+	}
+	fs := flag.NewFlagSet("graph "+sub, flag.ContinueOnError)
+	repoFlag := fs.String("repo", "", "repository path (default: current directory)")
+	n := fs.Int("n", 30, "max results")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+	// Allow flags to follow the positional name (Go's flag stops at the first
+	// non-flag): grab the name, then re-parse any flags that came after it.
+	name := ""
+	if fs.NArg() > 0 {
+		name = fs.Arg(0)
+		if err := fs.Parse(fs.Args()[1:]); err != nil {
+			return err
+		}
+	}
+	repoAbs, err := resolveRepo(*repoFlag)
+	if err != nil {
+		return err
+	}
+	if sub == "delete" || sub == "rm" {
+		ok, err := graph.RemoveForRepo(repoAbs)
+		if err != nil {
+			return err
+		}
+		if ok {
+			fmt.Printf("deleted code graph for %s\n", filepath.Base(repoAbs))
+		} else {
+			fmt.Printf("no code graph to delete for %s\n", filepath.Base(repoAbs))
+		}
+		return nil
+	}
+	g, err := graph.OpenForRepo(repoAbs)
+	if err != nil {
+		return err
+	}
+	defer g.Close()
+	ctx := context.Background()
+
+	switch sub {
+	case "build":
+		st, err := g.Build(ctx, repoAbs, graph.DefaultRegistry())
+		if err != nil {
+			return err
+		}
+		fmt.Printf("built %s: %d files, %d symbols, %d edges (%d resolved)\n",
+			filepath.Base(repoAbs), st.Files, st.Symbols, st.Edges, st.ResolvedEdges)
+		tiers := make([]graph.Tier, 0, len(st.ByTier))
+		for t := range st.ByTier {
+			tiers = append(tiers, t)
+		}
+		sort.Slice(tiers, func(i, j int) bool { return tiers[i] < tiers[j] })
+		for _, t := range tiers {
+			fmt.Printf("  %-12s %d files\n", t, st.ByTier[t])
+		}
+		if st.Unsupported > 0 {
+			fmt.Printf("  unsupported  %d files — run `orchard graph install-ast-grep` (or brew install ast-grep) for Kotlin/C#/C/C++/TSX\n", st.Unsupported)
+		}
+		return nil
+	case "status":
+		stale, changed, err := g.Stale(ctx, repoAbs)
+		if err != nil {
+			return err
+		}
+		f := g.Freshness()
+		files, symbols, edges, _ := g.Counts()
+		built := "never"
+		if !f.BuiltAt.IsZero() {
+			built = f.BuiltAt.Format(time.RFC3339)
+		}
+		commit := f.HeadCommit
+		if len(commit) > 8 {
+			commit = commit[:8]
+		}
+		fmt.Printf("repo:   %s\n", repoAbs)
+		fmt.Printf("built:  %s   commit: %s   dirty: %d\n", built, commit, f.DirtyFiles)
+		fmt.Printf("graph:  %d files, %d symbols, %d edges\n", files, symbols, edges)
+		if quality := formatTierCounts(g.TierCounts()); quality != "" {
+			fmt.Printf("quality:%s\n", quality)
+		}
+		fmt.Printf("stale:  %v (%d files changed since build)\n", stale, changed)
+		return nil
+	case "map":
+		rows, err := g.RepoMap(*n)
+		if err != nil {
+			return err
+		}
+		for _, m := range rows {
+			fmt.Printf("%-10s %-24s %s\n", m.Kind, m.Name, m.Path)
+		}
+		return nil
+	case "find":
+		rows, err := g.FindDef(name, *n)
+		if err != nil {
+			return err
+		}
+		for _, d := range rows {
+			fmt.Printf("%s:%d  %s  %s\n", d.Path, d.Line, d.Kind, d.Signature)
+		}
+		return nil
+	case "callers":
+		rows, err := g.WhoCalls(name, *n, 0)
+		if err != nil {
+			return err
+		}
+		for _, c := range rows {
+			fmt.Printf("%s:%d  %s\n", c.Path, c.Line, c.Caller)
+		}
+		return nil
+	case "blast":
+		rows, err := g.BlastRadius(name, 6, *n)
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			fmt.Printf("%s  %s\n", r.Name, r.Path)
+		}
+		return nil
+	case "search":
+		rows, err := g.SearchSymbols(name, *n)
+		if err != nil {
+			return err
+		}
+		for _, d := range rows {
+			fmt.Printf("%s:%d  %s  %s\n", d.Path, d.Line, d.Kind, d.Name)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown graph subcommand %q", sub)
+	}
+}
+
+func formatTierCounts(tiers map[graph.Tier]int) string {
+	if len(tiers) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, tier := range []graph.Tier{graph.TierPrecise, graph.TierGood, graph.TierBestEffort, graph.TierUnsupported} {
+		if n := tiers[tier]; n > 0 {
+			parts = append(parts, fmt.Sprintf(" %s=%d", tier, n))
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// repoList collects a repeatable --repo flag.
+type repoList []string
+
+func (r *repoList) String() string { return strings.Join(*r, ",") }
+func (r *repoList) Set(v string) error {
+	*r = append(*r, v)
+	return nil
+}
+
+// runMCP implements `orchard mcp`: it opens repo graph(s), serves immediately,
+// and refreshes them in the background unless --no-build is set. `--repo` is
+// repeatable; with several repos it serves a merged cross-repo view. Nothing is
+// written to stdout except the MCP protocol stream; diagnostics go to stderr.
+func runMCP(args []string) error {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	var repos repoList
+	fs.Var(&repos, "repo", "repository path (repeatable; serves a merged cross-repo graph)")
+	noBuild := fs.Bool("no-build", false, "skip the freshness reindex on startup")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if len(repos) == 0 {
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		repos = repoList{wd}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	var wg sync.WaitGroup
+	var graphs []*graph.Graph
+	defer func() {
+		for _, g := range graphs {
+			_ = g.Close()
+		}
+	}()
+	defer wg.Wait()
+
+	var served []mcp.RepoGraph
+	for _, rp := range repos {
+		abs, err := filepath.Abs(rp)
+		if err != nil {
+			return err
+		}
+		g, err := graph.OpenForRepo(abs)
+		if err != nil {
+			return err
+		}
+		graphs = append(graphs, g)
+		rg := mcp.NewRepoGraph(filepath.Base(abs), g, abs)
+		served = append(served, rg)
+		if !*noBuild {
+			// Serve immediately; refresh in the background and expose indexing
+			// state through the MCP status/freshness fields.
+			wg.Add(1)
+			go func(r mcp.RepoGraph, repoAbs string) {
+				defer wg.Done()
+				r.SetIndexing(true)
+				defer r.SetIndexing(false)
+				_, err := r.G.Update(ctx, repoAbs, graph.DefaultRegistry())
+				r.SetError(err)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "orchard mcp: graph update failed for", repoAbs, ":", err)
+				}
+			}(rg, abs)
+		}
+	}
+	return mcp.Serve(ctx, served)
 }
 
 func runUpdate() error {

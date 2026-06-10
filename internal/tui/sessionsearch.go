@@ -92,7 +92,7 @@ func (m model) handleSessionSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		h := m.sessionSearchResults[m.sessionSearchCursor]
 		m.mode = m.returnMode
-		return m.runAssistant(h.RepoPath, []string{"--resume", h.ID}, nil, "resuming "+m.assistantLabel+" · "+h.RepoName)
+		return m.runAssistant(h.RepoPath, []string{"--resume", h.ID}, nil, "resuming "+m.assistantLabel+" · "+h.RepoName, []string{h.RepoPath})
 	}
 	return m, nil
 }

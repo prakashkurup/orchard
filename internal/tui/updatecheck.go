@@ -15,7 +15,7 @@ type updateMsg struct {
 
 func updateCheckCmd(version string) tea.Cmd {
 	if demoMode() {
-		return func() tea.Msg { return updateMsg{tag: "v0.4.0", available: true} }
+		return func() tea.Msg { return updateMsg{tag: "v0.7.0", available: true} }
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
