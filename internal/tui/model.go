@@ -479,7 +479,7 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 		info, _ := orchardgit.Detail(ctx, target)
 		m.instructionsByPath = map[string]instrState{target.Path: detectInstr(target.Path)}
 		sessions := claude.Sessions(target.Path, 10)
-		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, target.Path, sessions), touched: claude.TouchMap(target.Path, touchMapSessions)}
+		m.detail = &detailState{repo: target, info: info, langs: lang.Detect(ctx, target.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, target.Path, sessions), touched: claude.TouchMap(target.Path, touchMapSessions), codexSessions: codex.Sessions(target.Path, 10), codexTouched: codex.TouchMap(target.Path, touchMapSessions)}
 	}
 	m.setDetailContent()
 	return m.View(), nil

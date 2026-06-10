@@ -16,9 +16,9 @@ import (
 )
 
 // wireGraphMCP registers orchard's code-graph MCP server into configRepo's
-// .mcp.json before a Claude Code launch, serving the graphs of graphRepos (one
-// repo normally; several for a cross-repo `A` session). Best-effort, idempotent,
-// Claude-only; set ORCHARD_GRAPH_MCP=0 to disable.
+// agent config (.mcp.json for Claude Code, .codex/config.toml for Codex) before
+// a launch, serving the graphs of graphRepos (one repo normally; several for a
+// cross-repo `A` session). Idempotent; set ORCHARD_GRAPH_MCP=0 to disable.
 func (m model) wireGraphMCP(configRepo string, graphRepos []string) error {
 	if len(graphRepos) == 0 || !m.graphWiringEnabled() {
 		return nil
