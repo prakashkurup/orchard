@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/editor"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/github"
@@ -63,7 +64,7 @@ func (s sortMode) String() string {
 	case sortSynced:
 		return "synced"
 	case sortClaude:
-		return "claude"
+		return "agent"
 	default:
 		return "attention"
 	}
@@ -162,6 +163,7 @@ type model struct {
 	confirmYes   bool        // confirm modal selection (true = Yes, the default)
 
 	claudeUsage *claude.Usage
+	codexUsage  *claude.Usage // same shape; read from Codex rollouts
 
 	sessionsRepo    repo.Repo // repo whose Claude Code sessions are being browsed
 	sessions        []claude.Session
@@ -192,6 +194,7 @@ type model struct {
 	statsLoading bool           // the stats heatmaps are still computing
 	statsHarvest map[string]int // commit day -> count (stats page)
 	statsClaude  map[string]int // Claude session day -> turns (stats page)
+	statsCodex   map[string]int // Codex session day -> turns (stats page)
 
 	commitMsgRepo    repo.Repo // repo a headless commit message is being drafted for
 	commitMsg        string    // the drafted message
@@ -289,20 +292,23 @@ type statusMsg struct {
 }
 
 type detailMsg struct {
-	path         string
-	info         orchardgit.DetailInfo
-	langs        []lang.Stat
-	sessions     []claude.Session
-	commitsSince int
-	touched      []claude.TouchedFile
-	graph        graph.GraphState
-	graphOK      bool
-	graphMap     []graph.MapRow
-	err          error
+	path          string
+	info          orchardgit.DetailInfo
+	langs         []lang.Stat
+	sessions      []claude.Session
+	commitsSince  int
+	touched       []claude.TouchedFile
+	codexSessions []claude.Session
+	codexTouched  []claude.TouchedFile
+	graph         graph.GraphState
+	graphOK       bool
+	graphMap      []graph.MapRow
+	err           error
 }
 
 type claudeStatsMsg struct {
 	usage claude.Usage
+	codex claude.Usage
 }
 
 type tickMsg time.Time
@@ -421,6 +427,8 @@ func Preview(root string, concurrency, width, height int, grouped bool) (string,
 	}
 	u := claude.Aggregate(targets)
 	m.claudeUsage = &u
+	cu := codex.Aggregate(targets)
+	m.codexUsage = &cu
 	for _, r := range repos {
 		if s := lang.Dominant(ctx, r.Path); s.Name != "" {
 			m.langByPath[r.Path] = s
@@ -731,8 +739,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, graphStatesCmd(m.repos) // refresh badges now the build is done
 
 	case claudeStatsMsg:
-		u := msg.usage
-		m.claudeUsage = &u
+		u, cu := msg.usage, msg.codex
+		m.claudeUsage, m.codexUsage = &u, &cu
 		m.resize() // panel may now appear/disappear; let the list reclaim rows
 		return m, nil
 
@@ -890,6 +898,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statsLoading = false
 		m.statsHarvest = msg.harvest
 		m.statsClaude = msg.claude
+		m.statsCodex = msg.codex
 		if m.mode == modeStats {
 			m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
 		}
@@ -988,7 +997,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detailMsg:
 		if msg.path == m.detailRepo {
-			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions, commitsSince: msg.commitsSince, touched: msg.touched, graph: msg.graph, graphOK: msg.graphOK, graphMap: msg.graphMap}
+			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions, commitsSince: msg.commitsSince, touched: msg.touched, codexSessions: msg.codexSessions, codexTouched: msg.codexTouched, graph: msg.graph, graphOK: msg.graphOK, graphMap: msg.graphMap}
 			if msg.err != nil {
 				st.err = msg.err.Error()
 			} else {
@@ -1117,12 +1126,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) resize() {
 	inner := m.innerWidth()
 	m.viewport.Width = inner
-	// header(3)+metrics(1)+grid header(1)+footer(2)+padding(2)=9, plus the
-	// Claude panel(3) when it is shown. When hidden, the list reclaims those rows.
+	// header(3)+metrics(1)+grid header(1)+footer(2)+padding(2)=9, plus the agent
+	// usage panel when it is shown. When hidden, the list reclaims those rows.
 	chrome := 9
-	if m.showClaudePanel() {
-		chrome += 3
-	}
+	chrome += m.claudePanelRows()
 	m.viewport.Height = clamp(m.height-chrome, 3, max(3, m.height))
 	m.detailVP.Width = inner
 	m.detailVP.Height = clamp(m.height-7, 3, max(3, m.height))

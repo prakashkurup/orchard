@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
 
@@ -17,8 +18,8 @@ type sessionSearchMsg struct {
 }
 
 func (m model) openSessionSearch() (tea.Model, tea.Cmd) {
-	if !m.assistantIsClaude() {
-		m.status = "session search needs Claude Code"
+	if !m.agentSupportsSessions() {
+		m.status = "session search needs claude or codex"
 		return m, nil
 	}
 	m.returnMode = m.mode
@@ -32,7 +33,7 @@ func (m model) openSessionSearch() (tea.Model, tea.Cmd) {
 	return m, textinput.Blink
 }
 
-func sessionSearchCmd(repos []repo.Repo, query string) tea.Cmd {
+func sessionSearchCmd(repos []repo.Repo, query string, useCodex bool) tea.Cmd {
 	if demoMode() {
 		return func() tea.Msg { return sessionSearchMsg{query: query, hits: demoSessionHits(query)} }
 	}
@@ -40,6 +41,9 @@ func sessionSearchCmd(repos []repo.Repo, query string) tea.Cmd {
 		targets := make([]claude.Target, 0, len(repos))
 		for _, r := range repos {
 			targets = append(targets, claude.Target{Name: r.Name, Path: r.Path})
+		}
+		if useCodex {
+			return sessionSearchMsg{query: query, hits: codex.SearchSessions(targets, query, 200)}
 		}
 		return sessionSearchMsg{query: query, hits: claude.SearchSessions(targets, query, 200)}
 	}
@@ -65,7 +69,7 @@ func (m model) handleSessionSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sessionSearchRunning = true
 			m.sessionSearchResults = nil
 			m.sessionSearchCursor = 0
-			return m, sessionSearchCmd(m.repos, q)
+			return m, sessionSearchCmd(m.repos, q, m.assistantIsCodex())
 		default:
 			var cmd tea.Cmd
 			m.sessionSearchInput, cmd = m.sessionSearchInput.Update(msg)
