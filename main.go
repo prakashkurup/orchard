@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/config"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	orchardgithub "github.com/prakashkurup/orchard/internal/github"
@@ -144,6 +145,11 @@ func runScan(args []string, cfg config.Config) error {
 	repos, err := orchardgit.Scan(ctx, *root, *concurrency)
 	if err != nil {
 		return err
+	}
+	// agent summaries (cheap, filesystem-only) so the JSON carries cc_*/codex_*
+	for i := range repos {
+		repos[i].CCSessions, repos[i].CCLast = claude.Summary(repos[i].Path)
+		repos[i].CodexSessions, repos[i].CodexLast = codex.Summary(repos[i].Path)
 	}
 	if *jsonOut {
 		return printJSON(repos)
@@ -822,10 +828,17 @@ func runStats(args []string, cfg config.Config) error {
 		fmt.Printf("\n  %s   %s\n", st(cMuted).Render("claude"),
 			st(cMuted).Render(fmt.Sprintf("%d sessions · %d turns · %s tokens", u.TotalSessions, u.TotalTurns, humanInt(u.TotalTokens))))
 	}
+	if u := codex.Aggregate(targets); u.TotalSessions > 0 {
+		fmt.Printf("  %s    %s\n", st(cMuted).Render("codex"),
+			st(cMuted).Render(fmt.Sprintf("%d sessions · %d turns · %s tokens", u.TotalSessions, u.TotalTurns, humanInt(u.TotalTokens))))
+	}
 	if hm := harvestHeatmap(ctx, repos); hm != "" {
 		fmt.Print(hm)
 	}
 	if hm := claudeHeatmap(repos); hm != "" {
+		fmt.Print(hm)
+	}
+	if hm := codexHeatmap(repos); hm != "" {
 		fmt.Print(hm)
 	}
 	fmt.Println()
@@ -915,6 +928,24 @@ func claudeHeatmap(repos []repo.Repo) string {
 	}
 	return renderHeatmap("claude", fmt.Sprintf("%d turns in the last %d weeks", total, heatWeeks),
 		counts, total, [3]int{20, 50, 100}, [4]string{"#7A4A1E", "#B5742E", "#E0973F", "#FF9E64"})
+}
+
+// codexHeatmap is your Codex turns per day over the last heatWeeks weeks.
+func codexHeatmap(repos []repo.Repo) string {
+	cutoff := time.Now().AddDate(0, 0, -7*heatWeeks)
+	counts := map[string]int{}
+	total := 0
+	for _, r := range repos {
+		for _, s := range codex.Sessions(r.Path, 0) {
+			if s.Modified.Before(cutoff) {
+				continue
+			}
+			counts[s.Modified.Format("2006-01-02")] += s.Assistant
+			total += s.Assistant
+		}
+	}
+	return renderHeatmap("codex", fmt.Sprintf("%d turns in the last %d weeks", total, heatWeeks),
+		counts, total, [3]int{20, 50, 100}, [4]string{"#14532D", "#15803D", "#16A34A", "#19C37D"})
 }
 
 // humanInt formats a large count compactly: 1234 -> "1.2k", 1234567 -> "1.2M".
