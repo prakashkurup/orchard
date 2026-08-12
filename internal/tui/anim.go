@@ -178,7 +178,7 @@ func (m *model) pulse(path string) tea.Cmd {
 // line and page scrolling can be handled from one place.
 func usesDetailVP(mode uiMode) bool {
 	switch mode {
-	case modeDetail, modeDiff, modeStats, modeHelp, modeWorklog, modePreview:
+	case modeDetail, modeDiff, modeStats, modeHelp, modeWorklog, modePreview, modeCodeburn:
 		return true
 	}
 	return false

@@ -146,6 +146,8 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "T":
 		return m.openStats()
+	case "U":
+		return m.openCodeburn()
 	case "I":
 		return m.requestWire(m.selectionTargets())
 	case "B":
@@ -431,7 +433,7 @@ func (m model) footerView(width int) string {
 		opts = append(opts,
 			cmdHint("p", "pull"), cmdHint("/", "filter"), cmdHint("tab", "quick filter"),
 			cmdHint("space", "select"), cmdHint("s", "sort"), cmdHint("d", "diff"), cmdHint("v", "docs"),
-			cmdHint("B", "graph"), cmdHint("S", "search"), cmdHint("R", "find sessions"), cmdHint("T", "stats"), cmdHint("L", "worklog"),
+			cmdHint("B", "graph"), cmdHint("S", "search"), cmdHint("R", "find sessions"), cmdHint("U", "cost"), cmdHint("T", "stats"), cmdHint("L", "worklog"),
 		)
 		line = fillLine(packHints(width, opts, []string{cmdHint("?", "help"), cmdHint("q", "quit")}), width, bg)
 	}

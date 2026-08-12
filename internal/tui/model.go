@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/prakashkurup/orchard/internal/claude"
+	"github.com/prakashkurup/orchard/internal/codeburn"
 	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/editor"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
@@ -45,6 +46,7 @@ const (
 	modePresets
 	modeTouched
 	modePreview
+	modeCodeburn
 )
 
 type sortMode int
@@ -164,6 +166,14 @@ type model struct {
 
 	claudeUsage *claude.Usage
 	codexUsage  *claude.Usage // same shape; read from Codex rollouts
+
+	codeburnClient        *codeburn.Client
+	codeburnPayload       *codeburn.Payload
+	codeburnPayloadPeriod codeburn.Period
+	codeburnPeriod        codeburn.Period
+	codeburnFetched       time.Time
+	codeburnLoading       bool
+	codeburnErr           string
 
 	sessionsRepo    repo.Repo // repo whose Claude Code sessions are being browsed
 	sessions        []claude.Session
@@ -376,6 +386,7 @@ type searchResultMsg struct {
 
 func Run(root string, concurrency int, version string) error {
 	m := newModel(root, concurrency)
+	defer func() { _ = m.codeburnClient.Close() }()
 	m.version = version
 	opts := []tea.ProgramOption{tea.WithAltScreen()}
 	if os.Getenv("ORCHARD_NO_MOUSE") == "" {
@@ -399,6 +410,10 @@ func Preview(root string, concurrency, width, height int, grouped bool) (string,
 		m.status = fmt.Sprintf("previewing %d repos", len(m.repos))
 		u := demoClaude()
 		m.claudeUsage = &u
+		burn := demoCodeburn(codeburn.PeriodToday)
+		m.codeburnPayload = &burn
+		m.codeburnPayloadPeriod = codeburn.PeriodToday
+		m.codeburnFetched = time.Now()
 		m.langByPath = demoLangs()
 		m.newByPath = demoNew()
 		m.ghStatus = demoGHStatus()
@@ -578,6 +593,8 @@ func newModel(root string, concurrency int) model {
 		status:             tendingLine(),
 		assistantCmd:       aCmd,
 		assistantLabel:     aLabel,
+		codeburnClient:     codeburn.NewClient(),
+		codeburnPeriod:     codeburn.PeriodToday,
 		idleGen:            1,
 		idleAfter:          idleSeconds(),
 	}
@@ -640,7 +657,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// recompute languages on every manual scan (startup / refresh / after
 		// clone) so newly-added repos get their language; claude usage too.
-		cmds := []tea.Cmd{claudeStatsCmd(m.repos), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos), graphStatesCmd(m.repos), countCmd}
+		m.codeburnLoading = true
+		cmds := []tea.Cmd{claudeStatsCmd(m.repos), codeburnCmd(m.codeburnClient, m.root, m.codeburnPeriod), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos), graphStatesCmd(m.repos), countCmd}
 		if !m.seenChecked { // "since last visit" baseline: once per launch only
 			m.seenChecked = true
 			cmds = append(cmds, newCommitsCmd(m.repos))
@@ -744,10 +762,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize() // panel may now appear/disappear; let the list reclaim rows
 		return m, nil
 
+	case codeburnMsg:
+		m = m.applyCodeburnMsg(msg)
+		return m, nil
+
 	case tickMsg:
 		// always re-arm; only refresh when idle and on the list (no flicker mid-action)
 		if m.autoRefresh && !m.loading && m.mode == modeList && len(m.pulling) == 0 {
-			return m, tea.Batch(tickCmd(), silentScanCmd(m.root, m.concurrency))
+			cmds := []tea.Cmd{tickCmd(), silentScanCmd(m.root, m.concurrency)}
+			if !m.codeburnLoading && time.Since(m.codeburnFetched) >= codeburnRefreshAge {
+				m.codeburnLoading = true
+				cmds = append(cmds, codeburnCmd(m.codeburnClient, m.root, m.codeburnPeriod))
+			}
+			return m, tea.Batch(cmds...)
 		}
 		return m, tickCmd()
 
@@ -1030,6 +1057,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case m.mode == modeTouched && m.touchedLoading:
 			return m, cmd // touchedView reads m.spinner.View() on each render
+		case m.mode == modeCodeburn && m.codeburnLoading:
+			m.setCodeburnContent()
+			return m, cmd
 		}
 		return m, nil // nothing loading: let the tick chain stop
 
@@ -1100,6 +1130,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleDiffKey(msg)
 		case modeStats:
 			return m.handleStatsKey(msg)
+		case modeCodeburn:
+			return m.handleCodeburnKey(msg)
 		case modeCommitMsg:
 			return m.handleCommitMsgKey(msg)
 		case modeSessionSearch:
@@ -1130,6 +1162,7 @@ func (m *model) resize() {
 	// usage panel when it is shown. When hidden, the list reclaims those rows.
 	chrome := 9
 	chrome += m.claudePanelRows()
+	chrome += m.codeburnSummaryRows()
 	m.viewport.Height = clamp(m.height-chrome, 3, max(3, m.height))
 	m.detailVP.Width = inner
 	m.detailVP.Height = clamp(m.height-7, 3, max(3, m.height))
@@ -1155,6 +1188,9 @@ func (m *model) resize() {
 	}
 	if m.mode == modeStats {
 		m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
+	}
+	if m.mode == modeCodeburn {
+		m.setCodeburnContent()
 	}
 }
 
@@ -1193,6 +1229,8 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
 	case modeStats:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.statsView(inner))
+	case modeCodeburn:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.codeburnView(inner))
 	case modeHelp:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.helpView(inner))
 	case modeWorklog:
@@ -1218,6 +1256,9 @@ func (m model) dashboardBody(inner int) string {
 		m.headerView(inner),
 		m.metricsView(inner),
 		m.gridView(inner),
+	}
+	if m.codeburnPayload != nil {
+		rows = append(rows, m.codeburnSummary(inner))
 	}
 	if m.showClaudePanel() {
 		rows = append(rows, m.claudePanel(inner))
