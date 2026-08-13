@@ -35,9 +35,41 @@ func TestCodeburnSummaryIsTwoRowsAndShowsCost(t *testing.T) {
 	if m.codeburnSummaryRows() != 2 {
 		t.Fatalf("summary rows = %d, want 2", m.codeburnSummaryRows())
 	}
-	for _, want := range []string{"CODEBURN", "$42.73", "cache hit", "U full usage"} {
+	for _, want := range []string{"AGENT USAGE", "via CodeBurn", "$42.73", "cache hit", "U full usage"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("summary missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestCodeburnReplacesLegacyUsageSummary(t *testing.T) {
+	m := newModel("/repo", 4)
+	claudeUsage := demoClaude()
+	m.claudeUsage = &claudeUsage
+	if !m.showLegacyUsageSummary() || m.legacyUsageSummaryRows() == 0 {
+		t.Fatal("legacy usage should show while CodeBurn has no data")
+	}
+	payload := demoCodeburn(codeburn.PeriodToday)
+	m.codeburnPayload = &payload
+	if m.showLegacyUsageSummary() || m.legacyUsageSummaryRows() != 0 {
+		t.Fatal("CodeBurn data should replace the differently scoped legacy summary")
+	}
+}
+
+func TestCodeburnShowsUnpricedModelOnceInsideModelPanel(t *testing.T) {
+	m := newModel("/repo", 4)
+	payload := demoCodeburn(codeburn.PeriodToday)
+	payload.Current.UnpricedModels = []codeburn.UnpricedModel{{Model: "Codex Auto Review", Calls: 28, Tokens: 5_910_602}}
+	m.codeburnPayload = &payload
+	m.codeburnPayloadPeriod = codeburn.PeriodToday
+	m.codeburnPeriod = codeburn.PeriodToday
+	out := strings.ToLower(ansiPattern.ReplaceAllString(m.codeburnBody(140), ""))
+	if got := strings.Count(out, "unpriced"); got != 1 {
+		t.Fatalf("unpriced note count = %d, want 1\n%s", got, out)
+	}
+	for _, want := range []string{"codex auto review", "28 calls"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("unpriced note missing %q\n%s", want, out)
 		}
 	}
 }

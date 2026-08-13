@@ -1161,7 +1161,7 @@ func (m *model) resize() {
 	// header(3)+metrics(1)+grid header(1)+footer(2)+padding(2)=9, plus the agent
 	// usage panel when it is shown. When hidden, the list reclaims those rows.
 	chrome := 9
-	chrome += m.claudePanelRows()
+	chrome += m.legacyUsageSummaryRows()
 	chrome += m.codeburnSummaryRows()
 	m.viewport.Height = clamp(m.height-chrome, 3, max(3, m.height))
 	m.detailVP.Width = inner
@@ -1260,7 +1260,7 @@ func (m model) dashboardBody(inner int) string {
 	if m.codeburnPayload != nil {
 		rows = append(rows, m.codeburnSummary(inner))
 	}
-	if m.showClaudePanel() {
+	if m.showLegacyUsageSummary() {
 		rows = append(rows, m.claudePanel(inner))
 	}
 	rows = append(rows, m.footerView(inner))

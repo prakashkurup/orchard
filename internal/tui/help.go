@@ -103,7 +103,7 @@ func (m model) helpBody(width int) string {
 			{"enter", "repo detail (status, graph, remotes)"},
 			{"d", "working-tree diff (vs HEAD)"},
 			{"L / T", "worklog / stats and heatmaps"},
-			{"U", "CodeBurn cost and usage dashboard"},
+			{"U", "agent usage and cost (via CodeBurn)"},
 			{"S", "search code across all repos"},
 		}},
 		{"FILTER & SORT", [][2]string{
