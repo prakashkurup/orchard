@@ -106,7 +106,8 @@ The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set,
 
 ### See activity
 
-- **Usage panel** pinned under the list: per-agent totals (sessions, turns, tokens, repos used, last active), a model split, and your busiest repos.
+- **Local activity fallback** pinned under the list when CodeBurn is unavailable or disabled: per-agent all-history totals, model split, and busiest repos.
+- **Agent usage, powered by CodeBurn** (optional): a project-root-scoped cost strip plus a native usage dashboard (`U`) for daily activity, projects, models, activities, providers, tools, MCP servers, skills, agents, and workflow metrics. See [CodeBurn integration](docs/codeburn.md).
 - **Per-repo `AGENT` column**: a mark for each agent that ran in the repo (both when you used both), with the freshest run age colored by recency.
 - **Active now**: a session writing in the last ~60s shows `live` (green); if that repo is also dirty it shows `!live` (red), so live AI work on an uncommitted tree stands out.
 - **Per-repo footprint in the detail view** (`enter`): each agent's recent sessions, turns, tokens, and last run, side by side when both have worked the repo.
@@ -229,6 +230,7 @@ Press `?` in-app for the same keymap and legend.
 | `S` | search code across all repos |
 | `L` | worklog - your commits across repos |
 | `T` | stats page (languages, freshest/thirstiest, per-agent usage, harvest + agent heatmaps) |
+| `U` | Agent usage and cost dashboard, powered by CodeBurn |
 | `/` | filter by text, or a `branch:` / `name:` prefix |
 | `tab` | cycle quick filters (attention, dirty, behind, feature, at-risk, ai-touched, needs-md) |
 | `s` / `o` | cycle sort (attention / name / synced / agent) / toggle grouping |
