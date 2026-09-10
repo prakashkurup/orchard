@@ -57,11 +57,11 @@ func NewTab(dir, program string) (*exec.Cmd, bool) {
 	case "Apple_Terminal":
 		return exec.Command("osascript", "-e", terminalScript(shell, login(true))), true
 	case "ghostty", "Ghostty":
-		// macOS Ghostty has no new-window IPC; the documented way is
-		// `open -na Ghostty.app --args -e <cmd>`. cd is baked into the command so
-		// we don't depend on the --working-directory key.
-		return exec.Command("open", "-na", "Ghostty.app", "--args",
-			"-e", shell, "-lc", login(true)), true
+		// Current Ghostty releases expose a native AppleScript new-tab API. Fall
+		// back to the older separate-window launcher when that API is unavailable.
+		script := ghosttyScript(dir, shell, login(false))
+		fallback := "/usr/bin/open -na Ghostty.app --args -e " + shQuote(shell) + " -lc " + shQuote(login(true))
+		return exec.Command(shell, "-lc", "osascript -e "+shQuote(script)+" || exec "+fallback), true
 	case "WezTerm":
 		return exec.Command("wezterm", "cli", "spawn", "--cwd", dir, "--", shell, "-lc", login(false)), true
 	}
@@ -71,6 +71,24 @@ func NewTab(dir, program string) (*exec.Cmd, bool) {
 		return exec.Command("osascript", "-e", terminalScript(shell, login(true))), true
 	}
 	return nil, false
+}
+
+func ghosttyScript(dir, shell, cmd string) string {
+	run := "exec " + shQuote(shell) + " -lc " + shQuote(cmd)
+	return `tell application "Ghostty"
+	activate
+	set cfg to new surface configuration
+	set initial working directory of cfg to ` + asQuote(dir) + `
+	set initial input of cfg to ` + asQuote(run) + ` & linefeed
+	if (count of windows) = 0 then
+		set createdWindow to new window with configuration cfg
+		focus focused terminal of selected tab of createdWindow
+	else
+		set win to front window
+		set createdTab to new tab in win with configuration cfg
+		focus focused terminal of createdTab
+	end if
+end tell`
 }
 
 func iTermScript(shell, cmd string) string {

@@ -43,11 +43,18 @@ func TestNewTabGhostty(t *testing.T) {
 	if !ok || cmd == nil {
 		t.Fatal("expected a command")
 	}
-	if !argsContain(cmd.Args, "Ghostty.app") || !argsContain(cmd.Args, "-e") {
+	joined := strings.Join(cmd.Args, " ")
+	if cmd.Args[0] != "/bin/zsh" || !strings.Contains(joined, "new tab in win") {
 		t.Fatalf("ghostty args = %v", cmd.Args)
 	}
-	if !strings.Contains(strings.Join(cmd.Args, " "), "claude") {
+	if !strings.Contains(joined, "initial working directory") || !strings.Contains(joined, "claude") {
 		t.Fatalf("command should run claude: %v", cmd.Args)
+	}
+	if !strings.Contains(joined, "& linefeed") {
+		t.Fatalf("ghostty command is not submitted: %v", cmd.Args)
+	}
+	if !strings.Contains(joined, "Ghostty.app") {
+		t.Fatalf("older-Ghostty fallback missing: %v", cmd.Args)
 	}
 }
 

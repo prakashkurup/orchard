@@ -50,6 +50,11 @@ func modalCases() []struct {
 			m.commitMsgRepo = repo.Repo{Name: "acme-web", Path: "/tmp/acme-web"}
 			m.commitMsgLoading = true
 		}},
+		{"agentLaunch", func(m *model) {
+			m.mode = modeAgentLaunch
+			m.agentChoices = []assistantChoice{{cmd: "claude", label: "Claude Code"}, {cmd: "codex", label: "Codex"}}
+			m.agentTargets = []repo.Repo{{Name: "alpha", Path: "/tmp/alpha"}}
+		}},
 	}
 }
 

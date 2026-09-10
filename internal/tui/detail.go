@@ -86,7 +86,7 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = copyToClipboard(m.repoByPath(m.detailRepo).Path, "path")
 		return m, nil
 	case "c":
-		return m.openClaude([]repo.Repo{m.repoByPath(m.detailRepo)})
+		return m.openAgentLauncher([]repo.Repo{m.repoByPath(m.detailRepo)})
 	case "C":
 		return m.openClaudeResume(m.repoByPath(m.detailRepo))
 	case "H":
@@ -1077,7 +1077,7 @@ func (m model) detailView(width int) string {
 	// wholesale and newly added keys stay visible. esc/scroll lead; least-used trail.
 	hints := fillLine(packHints(width, []string{
 		cmdHint("esc", "back"), cmdHint("↑↓", "scroll"),
-		cmdHint("c", "agent"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
+		cmdHint("c", "launch"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
 		cmdHint("f", "files"), cmdHint("v", "docs"), cmdHint("d", "diff"),
 		cmdHint("M", "commit msg"), cmdHint("I", "wire md"), cmdHint("b", "branch"),
 		cmdHint("p", "pull"), cmdHint("e", "editor"), cmdHint("O", "browser"), cmdHint("y", "copy path"),

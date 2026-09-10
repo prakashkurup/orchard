@@ -16,7 +16,7 @@ An agent-aware, multi-repo terminal dashboard. See every local git repo on one s
   - [`gh`](https://cli.github.com/) (GitHub CLI) - used by `orchard clone --org` for auth if `GITHUB_TOKEN` isn't set.
   - [`claude`](https://claude.com/claude-code) and/or [`codex`](https://developers.openai.com/codex/cli) - for the agent keys (`c`, `C`, `H`, `R`, `A`, `M`); activity always shows from local history either way.
   - [`ast-grep`](https://ast-grep.github.io/) - optional parser backend for Kotlin, TypeScript/TSX, Ruby, C#, Python, JavaScript, C, and C++; orchard can install a pinned copy with `orchard graph install-ast-grep`.
-  - A supported terminal for new-tab launches: Ghostty, iTerm2, WezTerm, tmux, or macOS Terminal (otherwise it falls back to running in place).
+  - A supported terminal for new-tab launches: Ghostty, iTerm2, WezTerm, tmux, or macOS Terminal. Ghostty, iTerm2, WezTerm, and tmux open in the current window; unsupported terminals can run the agent in Orchard's tab.
 
 ### Download a release (no Go required)
 
@@ -91,7 +91,7 @@ If you juggle many repositories and lean on Claude Code or Codex, orchard is the
 - **Code graph for agents** - build a SQLite symbol/call graph (`B` or `orchard graph build`) and serve it to Claude Code or Codex over MCP, including cross-repo sessions. See [Code Graph & MCP](#code-graph--mcp).
 - **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, and repos with no upstream (a non-fast-forward is reported, never forced).
 - **Fetch, branch switch, multi-select** - act on one repo or many at once.
-- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or your agent (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
+- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or configure your agent (`c`) for this tab or a new terminal tab; multi-repo agent launches use one tab per repo.
 - **Cross-repo code search** (`S`) that respects `.gitignore`.
 - **Preview docs** (`v`) - render a repo's `CLAUDE.md` / `AGENTS.md` / `README.md` in the terminal, with its size and an estimated per-session token cost.
 - **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
@@ -103,14 +103,14 @@ If you juggle many repositories and lean on Claude Code or Codex, orchard is the
 
 orchard treats AI coding agents as a first-class part of a multi-repo workflow, with the same treatment for **Claude Code** and **OpenAI Codex**. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR`) and your `~/.codex` session rollouts (or `$CODEX_HOME`); nothing is sent anywhere.
 
-The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set, else the first of `claude` / `codex` on your `PATH`. The dashboard's `AGENT` column marks each agent that has run in a repo (both marks when you used both), and repos worked with both agents show both footprints side by side in the detail view.
+The `c` launch sheet offers every installed assistant, or the explicit `$ORCHARD_AI_CMD` when set. The selected assistant becomes the default for resume and related actions. The dashboard's `AGENT` column marks each agent that has run in a repo (both marks when you used both), and repos worked with both agents show both footprints side by side in the detail view.
 
 ### See activity
 
 - **Local activity fallback** pinned under the list when CodeBurn is unavailable or disabled: per-agent all-history totals, model split, and busiest repos.
 - **Agent usage, powered by CodeBurn** (optional): a project-root-scoped cost strip plus a native usage dashboard (`U`) for daily activity, projects, models, activities, providers, tools, MCP servers, skills, agents, and workflow metrics. See [CodeBurn integration](docs/codeburn.md).
 - **Per-repo `AGENT` column**: a mark for each agent that ran in the repo (both when you used both), with the freshest run age colored by recency.
-- **Active now**: a session writing in the last ~60s shows `live` (green); if that repo is also dirty it shows `!live` (red), so live AI work on an uncommitted tree stands out.
+- **Active now**: Orchard refreshes local agent activity every five seconds. A session writing in the last ~60s shows `live` (green) in both the dashboard and repo sidebar; if that repo is also dirty the dashboard shows `!live` (red).
 - **Per-repo footprint in the detail view** (`enter`): each agent's recent sessions, turns, tokens, and last run, side by side when both have worked the repo.
 - **Files the agent touched** (detail view): what it read or edited here, edited-first, with files it changed but hasn't committed flagged. Press `f` for the full list, then `enter` to open one in your editor or `d` to diff just that file.
 - **Uncommitted-work flag**: when a repo is dirty *and* an agent ran there recently, the `AGENT` cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
@@ -129,7 +129,7 @@ The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set,
 
 ### Launch across repos
 
-- **Launch** (`c`): open the agent in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
+- **Launch options** (`c`): choose Claude Code or Codex, run it in Orchard's current tab or a new terminal tab, select default / plan / workspace access, and optionally provide a model and starting prompt. Orchard returns when an in-place agent exits. Multiple selected repos open one configured tab each.
 - **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. With Claude Code, each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
 - **Workspace presets** (`W`): save a `space`-selected repo set under a name, then launch the cross-repo `A` session on it in one keystroke, for the groups of services you keep working on together. Stored in `presets.json` (see [Files orchard writes](#files-orchard-writes)).
 
@@ -180,7 +180,7 @@ Press `?` in-app for the same keymap and legend.
 
 ### Repo workspace sidebar
 
-Opening a repo (`enter`), diff (`d`), or session history (`H`) keeps a compact repo list alongside the content. It shows each repo's branch, `*` for uncommitted changes, and the age of its latest Claude/Codex activity. Activity ages describe local history, not a confirmed running or blocked agent state.
+Opening a repo (`enter`), diff (`d`), or session history (`H`) keeps a compact repo list alongside the content. It shows each repo's branch, `*` for uncommitted changes, and the age of its latest Claude/Codex activity. A colored `Claude live` or `Codex live` marker appears while that agent's local session is actively writing. This is activity-based monitoring rather than a process or blocked-state guarantee.
 
 - `tab` moves focus between the sidebar and content. With sidebar focus, `↑ ↓` / `j k` select a repo and `enter` opens it; clicking a repo opens it directly.
 - `[` / `]` open the previous / next repo, also when the sidebar is collapsed.
@@ -188,7 +188,7 @@ Opening a repo (`enter`), diff (`d`), or session history (`H`) keeps a compact r
 - Switching repos restores their last detail/diff/session view, scroll position, and session selection during the current Orchard process. Sidebar order stays fixed during a workspace visit, even when repo status refreshes.
 - `esc` first leaves sidebar focus; from content it goes back. Returning to the dashboard preserves its filter, cursor, scroll position, and bulk selections.
 
-Claude Code and Codex still launch in an external terminal tab/window, with the existing in-place fallback. The sidebar is visible in Orchard's own repo views; it does not embed or manage agent terminals.
+The `c` launch sheet can suspend Orchard and run a single agent in the same terminal tab. Its new-tab choice keeps Orchard visible and opens the agent in the current terminal window where the terminal exposes that capability. Orchard does not embed a second full-screen terminal emulator inside its Bubble Tea screen.
 
 ### Navigate and select
 
@@ -218,7 +218,7 @@ Claude Code and Codex still launch in an external terminal tab/window, with the 
 
 | Key | Action |
 |-----|--------|
-| `c` | open the agent (Claude Code / Codex) in a new tab (confirms for >1 repo) |
+| `c` | configure and launch Claude Code / Codex (agent, tab placement, access, model, and prompt) |
 | `C` | resume the agent's last session in the current repo |
 | `H` | browse the agent's past sessions for the current repo and resume any one |
 | `R` | search the *content* of past sessions across all repos, then resume one |

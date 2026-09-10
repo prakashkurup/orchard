@@ -117,7 +117,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "O":
 		return m.requestBrowser(m.selectionTargets())
 	case "c":
-		return m.requestClaude(m.selectionTargets())
+		return m.openAgentLauncher(m.selectionTargets())
 	case "C":
 		if r, ok := m.currentRepo(); ok {
 			return m.openClaudeResume(r)
@@ -673,8 +673,8 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 	return strings.Join(out, gap)
 }
 
-// agentActiveWindow: how recently a session must have been written for the AGENT
-// cell to read "live" (an agent writing right now).
+// agentActiveWindow is how recently a session must have been written for the
+// dashboard and repo sidebar to report live agent activity.
 const agentActiveWindow = 60 * time.Second
 
 // brand marks for each agent in the AGENT column (no official Unicode logo
@@ -700,7 +700,7 @@ func agentCell(r repo.Repo, width int, bgColor string, current bool) string {
 		last = r.CodexLast
 	}
 	recent := time.Since(last)
-	live := recent < agentActiveWindow && recent > -agentActiveWindow
+	live := agentIsActive(last)
 	dirtyHot := r.Dirty && recent < 24*time.Hour
 
 	// each agent's mark in its brand colour; the older of the two is dimmed
@@ -732,6 +732,11 @@ func agentCell(r repo.Repo, width int, bgColor string, current bool) string {
 		content += cellStyle(muted, bgColor, false).Render(strings.Repeat(" ", pad))
 	}
 	return content
+}
+
+func agentIsActive(last time.Time) bool {
+	recent := time.Since(last)
+	return recent < agentActiveWindow && recent > -agentActiveWindow
 }
 
 // sparkline renders weekly commit counts as a compact bar chart sized to width.

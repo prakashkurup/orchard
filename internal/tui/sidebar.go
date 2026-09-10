@@ -204,12 +204,21 @@ func (m model) sidebarView(height int) string {
 		rows = append(rows, fillLine(seg(muted, "  "+fit(branch, sidebarWidth-2)), sidebarWidth, bg))
 		agents := []string{}
 		if !r.CCLast.IsZero() {
-			agents = append(agents, "Claude "+relTime(r.CCLast))
+			if agentIsActive(r.CCLast) {
+				agents = append(agents, segB(claudeC, claudeMark+" Claude live"))
+			} else {
+				agents = append(agents, seg(muted, "Claude "+relTime(r.CCLast)))
+			}
 		}
 		if !r.CodexLast.IsZero() {
-			agents = append(agents, "Codex "+relTime(r.CodexLast))
+			if agentIsActive(r.CodexLast) {
+				agents = append(agents, segB(codexC, codexMark+" Codex live"))
+			} else {
+				agents = append(agents, seg(muted, "Codex "+relTime(r.CodexLast)))
+			}
 		}
-		rows = append(rows, fillLine(seg(muted, "  "+fit(strings.Join(agents, " · "), sidebarWidth-2)), sidebarWidth, bg))
+		agentLine := fitStyled(strings.Join(agents, seg(muted, " · ")), sidebarWidth-2)
+		rows = append(rows, fillLine(seg(muted, "  ")+agentLine, sidebarWidth, bg))
 	}
 	for len(rows) < height-1 {
 		rows = append(rows, fillLine("", sidebarWidth, bg))

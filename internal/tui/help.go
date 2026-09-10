@@ -86,7 +86,7 @@ func (m model) helpBody(width int) string {
 			{"r / w", "refresh now / toggle live refresh (also fetches remotes in the background)"},
 		}},
 		{"AI AGENTS (CLAUDE CODE / CODEX)", [][2]string{
-			{"c / C", "launch / resume last session"},
+			{"c / C", "configure + launch / resume last session"},
 			{"H", "browse and resume past sessions"},
 			{"f", "files the agent touched (detail page; open / diff them)"},
 			{"v", "preview CLAUDE.md / AGENTS.md / README (detail page)"},

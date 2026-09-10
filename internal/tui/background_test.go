@@ -137,6 +137,12 @@ func TestEveryModeAvoidsLegacyGrayBackgrounds(t *testing.T) {
 	m.setCodeburnContent()
 	add("codeburn", m)
 
+	m = base
+	m.mode = modeAgentLaunch
+	m.agentChoices = []assistantChoice{{cmd: "claude", label: "Claude Code"}, {cmd: "codex", label: "Codex"}}
+	m.agentTargets = m.repos[:1]
+	add("agent launch", m)
+
 	legacy := map[string]string{
 		"old modal panel":     "#20243A",
 		"Glamour Tokyo Night": "#1A1B26",
@@ -155,7 +161,7 @@ func TestEveryModeAvoidsLegacyGrayBackgrounds(t *testing.T) {
 			}
 		})
 	}
-	const uiModeCount = int(modeCodeburn) + 1
+	const uiModeCount = int(modeAgentLaunch) + 1
 	if len(views) != uiModeCount {
 		t.Fatalf("background audit covers %d of %d modes; add a representative render for the new mode", len(views), uiModeCount)
 	}

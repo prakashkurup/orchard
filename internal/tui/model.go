@@ -47,6 +47,7 @@ const (
 	modeTouched
 	modePreview
 	modeCodeburn
+	modeAgentLaunch
 )
 
 type sortMode int
@@ -280,8 +281,18 @@ type model struct {
 	ssActive  bool // the idle screensaver is showing
 	ssFrame   int  // screensaver animation frame
 
-	assistantCmd   string // AI assistant launched by `c` ("" = none found)
-	assistantLabel string // short footer label for the assistant
+	assistantCmd       string // AI assistant launched by `c` ("" = none found)
+	assistantLabel     string // short footer label for the assistant
+	agentChoices       []assistantChoice
+	agentChoice        int
+	agentTargets       []repo.Repo
+	agentPlacement     agentPlacement
+	agentAccess        agentAccess
+	agentLaunchRow     int
+	agentLaunchEditing bool
+	agentModelInput    textinput.Model
+	agentPromptInput   textinput.Model
+	agentMonitorBusy   bool
 
 	version   string // running version, for the update check
 	updateTag string // a newer release tag if one is available ("" = up to date)
@@ -563,6 +574,16 @@ func newModel(root string, concurrency int) model {
 	pi.Placeholder = "preset name…"
 	pi.CharLimit = 60
 
+	ami := textinput.New()
+	ami.Prompt = ""
+	ami.Placeholder = "agent default"
+	ami.CharLimit = 80
+
+	api := textinput.New()
+	api.Prompt = ""
+	api.Placeholder = "optional starting prompt"
+	api.CharLimit = 300
+
 	// Inputs must paint their own background or the placeholder (256-color grey
 	// with no bg) falls through to the terminal default and shows as a grey box.
 	// Modal inputs sit on the panel; the dashboard filter and search on the app bg.
@@ -574,6 +595,10 @@ func newModel(root string, concurrency int) model {
 	ci.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
 	pi.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
 	pi.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
+	ami.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
+	ami.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
+	api.PlaceholderStyle = onPanel.Foreground(lipgloss.Color(muted))
+	api.TextStyle = onPanel.Foreground(lipgloss.Color(ice))
 	ti.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
 	ti.TextStyle = onBg.Foreground(lipgloss.Color(ice))
 	si.PlaceholderStyle = onBg.Foreground(lipgloss.Color(muted))
@@ -596,6 +621,8 @@ func newModel(root string, concurrency int) model {
 		cloneInput:         ci,
 		sessionSearchInput: qi,
 		presetInput:        pi,
+		agentModelInput:    ami,
+		agentPromptInput:   api,
 		presets:            map[string][]string{},
 		selected:           map[string]bool{},
 		pulling:            map[string]bool{},
@@ -631,7 +658,7 @@ func displayRoot(root string) string {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), fetchTickCmd(), idleTickCmd(idleProbe, m.idleGen), updateCheckCmd(m.version))
+	return tea.Batch(scanCmd(m.root, m.concurrency), tickCmd(), fetchTickCmd(), agentMonitorTickCmd(), idleTickCmd(idleProbe, m.idleGen), updateCheckCmd(m.version))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -821,6 +848,18 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 		return m, tickCmd()
+
+	case agentMonitorTickMsg:
+		if !m.agentMonitorBusy && (m.mode == modeList || isWorkspaceMode(m.mode)) && len(m.repos) > 0 {
+			m.agentMonitorBusy = true
+			return m, tea.Batch(agentMonitorTickCmd(), agentMonitorCmd(m.repos))
+		}
+		return m, agentMonitorTickCmd()
+
+	case agentMonitorMsg:
+		m.agentMonitorBusy = false
+		m.applyAgentMonitor(msg)
+		return m, nil
 
 	case fetchTickMsg:
 		// Background fetch only while live refresh is on and the dashboard is idle,
@@ -1186,6 +1225,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleStatsKey(msg)
 		case modeCodeburn:
 			return m.handleCodeburnKey(msg)
+		case modeAgentLaunch:
+			return m.handleAgentLaunchKey(msg)
 		case modeCommitMsg:
 			return m.handleCommitMsgKey(msg)
 		case modeSessionSearch:
@@ -1224,6 +1265,8 @@ func (m *model) resize() {
 	m.searchVP.Height = clamp(m.height-8, 3, max(3, m.height))
 	m.filterInput.Width = clamp(inner-20, 10, 80)
 	m.searchInput.Width = clamp(inner-20, 10, 100)
+	m.agentModelInput.Width = clamp(inner-48, 12, 34)
+	m.agentPromptInput.Width = clamp(inner-48, 12, 34)
 	m.ensureCursorVisible()
 	m.syncRows()
 	if m.mode == modeDetail && m.detail != nil {
@@ -1308,6 +1351,8 @@ func (m model) renderView() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.statsView(inner))
 	case modeCodeburn:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.codeburnView(inner))
+	case modeAgentLaunch:
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.agentLaunchView(inner), inner))
 	case modeHelp:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.helpView(inner))
 	case modeWorklog:
