@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
@@ -86,8 +87,15 @@ func renderMarkdown(md string, width int) string {
 		}
 		return b.String()
 	}
+	style := styles.TokyoNightStyleConfig
+	style.Document.BackgroundColor = stringPtr(bg)
+	if style.CodeBlock.Chroma != nil {
+		chroma := *style.CodeBlock.Chroma
+		style.CodeBlock.Chroma = &chroma
+		style.CodeBlock.Chroma.Background.BackgroundColor = stringPtr(bg)
+	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("tokyo-night"), // matches orchard's own palette
+		glamour.WithStyles(style),
 		glamour.WithWordWrap(max(20, width-2)),
 	)
 	if err == nil {
@@ -97,6 +105,8 @@ func renderMarkdown(md string, width int) string {
 	}
 	return pad(seg(ice, cleanText(md)))
 }
+
+func stringPtr(s string) *string { return &s }
 
 func (m model) handlePreviewKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {

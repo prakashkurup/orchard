@@ -106,6 +106,13 @@ func (m model) helpBody(width int) string {
 			{"U", "agent usage and cost (via CodeBurn)"},
 			{"S", "search code across all repos"},
 		}},
+		{"REPO SIDEBAR (DETAIL / DIFF / SESSIONS)", [][2]string{
+			{"tab", "focus repo sidebar / content"},
+			{"up/down", "select a repo when sidebar is focused; enter opens it"},
+			{"[ / ]", "open previous / next repo, including with sidebar collapsed"},
+			{"\\", "hide / show sidebar (auto-collapses in a narrow terminal)"},
+			{"esc", "leave sidebar focus; in content, return to previous view"},
+		}},
 		{"FILTER & SORT", [][2]string{
 			{"/", "filter: text, or branch: / name: prefix"},
 			{"tab", "quick filters: dirty, behind, feature, at-risk, ai-touched, needs-md (no CLAUDE.md)"},

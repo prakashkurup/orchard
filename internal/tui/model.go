@@ -141,8 +141,17 @@ type model struct {
 	pulling                      map[string]bool
 	pullDone, pullSkip, pullFail int
 
-	detail     *detailState
-	detailRepo string
+	detail        *detailState
+	detailRepo    string
+	detailRequest uint64
+
+	sidebarHidden            bool
+	sidebarFocus             bool
+	sidebarPaths             []string // stable order for the current workspace visit
+	sidebarCursor            int
+	workspaceDashboardPath   string
+	workspaceDashboardOffset int
+	workspaceViews           map[string]repoWorkspaceView // remembered for this Orchard session
 
 	editorID     string
 	editorPick   []editor.Editor
@@ -180,12 +189,16 @@ type model struct {
 	sessionCursor   int
 	sessionsLoading bool
 	sessionsErr     string
+	sessionsRequest uint64
 
 	ghStatus map[string]github.RepoStatus // repo path -> open PRs + CI state
 
-	diffRepo repo.Repo // repo whose working-tree diff is shown
-	diffText string    // raw diff text, kept so it can re-colorize on resize
-	diffPath string    // single file the diff is scoped to ("" = whole working tree)
+	diffRepo    repo.Repo // repo whose working-tree diff is shown
+	diffText    string    // raw diff text, kept so it can re-colorize on resize
+	diffPath    string    // single file the diff is scoped to ("" = whole working tree)
+	diffLoading bool
+	diffErr     string
+	diffRequest uint64
 
 	touchedRepo    repo.Repo            // repo whose touched-files list is shown
 	touchedFiles   []claude.TouchedFile // files Claude read/edited there
@@ -302,6 +315,7 @@ type statusMsg struct {
 }
 
 type detailMsg struct {
+	request       uint64
 	path          string
 	info          orchardgit.DetailInfo
 	langs         []lang.Stat
@@ -503,9 +517,11 @@ func PreviewDetail(root string, concurrency, width, height int, name string) (st
 func newModel(root string, concurrency int) model {
 	vp := viewport.New(100, 16)
 	vp.MouseWheelEnabled = true
+	vp.Style = lipgloss.NewStyle().Background(lipgloss.Color(bg))
 
 	dvp := viewport.New(100, 16)
 	dvp.MouseWheelEnabled = true
+	dvp.Style = lipgloss.NewStyle().Background(lipgloss.Color(bg))
 
 	sp := spinner.New()
 	sp.Spinner = spinner.MiniDot
@@ -525,6 +541,7 @@ func newModel(root string, concurrency int) model {
 
 	svp := viewport.New(100, 16)
 	svp.MouseWheelEnabled = true
+	svp.Style = lipgloss.NewStyle().Background(lipgloss.Color(bg))
 
 	bi := textinput.New()
 	bi.Prompt = ""
@@ -618,6 +635,33 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.rememberWorkspaceView()
+	next, cmd := m.update(msg)
+	n := next.(model)
+	viewChanged := n.mode != m.mode || n.workspacePath() != m.workspacePath() || n.sidebarHidden != m.sidebarHidden || (n.status == "") != (m.status == "")
+	if viewChanged {
+		n.layoutWorkspace()
+		n.reflowCurrentContent()
+	}
+	if n.mode == modeList {
+		if len(n.sidebarPaths) > 0 {
+			for i, item := range n.view {
+				if !item.header && n.repos[item.repoIdx].Path == n.workspaceDashboardPath {
+					n.cursor = i
+					break
+				}
+			}
+			n.viewport.SetYOffset(n.workspaceDashboardOffset)
+			n.ensureCursorVisible()
+			n.viewport.SetContent(n.renderGrid(n.viewport.Width))
+		}
+		n.sidebarPaths = nil
+		n.sidebarFocus = false
+	}
+	return n, cmd
+}
+
+func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -768,7 +812,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		// always re-arm; only refresh when idle and on the list (no flicker mid-action)
-		if m.autoRefresh && !m.loading && m.mode == modeList && len(m.pulling) == 0 {
+		if m.autoRefresh && !m.loading && (m.mode == modeList || isWorkspaceMode(m.mode)) && len(m.pulling) == 0 {
 			cmds := []tea.Cmd{tickCmd(), silentScanCmd(m.root, m.concurrency)}
 			if !m.codeburnLoading && time.Since(m.codeburnFetched) >= codeburnRefreshAge {
 				m.codeburnLoading = true
@@ -862,10 +906,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case sessionsMsg:
-		if msg.path == m.sessionsRepo.Path {
+		if msg.path == m.sessionsRepo.Path && msg.request == m.sessionsRequest {
 			m.sessionsLoading = false
 			m.sessions = msg.sessions
-			m.sessionCursor = 0
+			m.sessionCursor = clamp(m.workspaceViews[msg.path].sessionCursor, 0, max(0, len(m.sessions)-1))
 		}
 		return m, nil
 
@@ -883,6 +927,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if m.ssActive {
 			return m, nil
+		}
+		if next, cmd, handled := m.handleSidebarMouse(msg); handled {
+			return next, cmd
 		}
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -963,15 +1010,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case diffMsg:
-		if msg.path == m.diffRepo.Path {
+		if msg.path == m.diffRepo.Path && msg.request == m.diffRequest {
+			m.diffLoading = false
+			m.diffText, m.diffErr = msg.text, ""
 			if msg.err != nil {
-				m.diffText = ""
-				m.detailVP.SetContent(fillLine(errorStyle.Render("  diff: "+msg.err.Error()), m.detailVP.Width, bg))
-			} else {
-				m.diffText = msg.text
-				m.detailVP.SetContent(colorizeDiff(msg.text, m.detailVP.Width))
+				m.diffErr = msg.err.Error()
 			}
-			m.detailVP.GotoTop()
+			if m.mode == modeDiff {
+				m.setDiffContent()
+				m.detailVP.SetYOffset(m.workspaceViews[msg.path].diffOffset)
+			}
 		}
 		return m, nil
 
@@ -1023,7 +1071,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case detailMsg:
-		if msg.path == m.detailRepo {
+		if msg.path == m.detailRepo && msg.request == m.detailRequest {
 			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions, commitsSince: msg.commitsSince, touched: msg.touched, codexSessions: msg.codexSessions, codexTouched: msg.codexTouched, graph: msg.graph, graphOK: msg.graphOK, graphMap: msg.graphMap}
 			if msg.err != nil {
 				st.err = msg.err.Error()
@@ -1031,7 +1079,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				st.info = msg.info
 			}
 			m.detail = st
-			m.setDetailContent()
+			if m.mode == modeDetail {
+				m.setDetailContent()
+				m.detailVP.SetYOffset(m.workspaceViews[msg.path].detailOffset)
+			}
 			if strings.HasPrefix(m.status, "loading ") {
 				m.status = ""
 			}
@@ -1087,6 +1138,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.filtering {
 			return m.handleFilterKey(msg)
+		}
+		if next, cmd, handled := m.handleSidebarKey(msg); handled {
+			return next, cmd
 		}
 		// Scrolling the shared detail viewport is handled from one place (instant,
 		// not eased), so every pager (detail, diff, stats, help, worklog, docs)
@@ -1172,7 +1226,7 @@ func (m *model) resize() {
 	m.searchInput.Width = clamp(inner-20, 10, 100)
 	m.ensureCursorVisible()
 	m.syncRows()
-	if m.detail != nil {
+	if m.mode == modeDetail && m.detail != nil {
 		m.setDetailContent()
 	}
 	if m.mode == modeSearch {
@@ -1181,7 +1235,7 @@ func (m *model) resize() {
 		m.setSearchContent()
 	}
 	if m.mode == modeDiff {
-		m.detailVP.SetContent(colorizeDiff(m.diffText, m.detailVP.Width))
+		m.setDiffContent()
 	}
 	if m.mode == modePreview {
 		m.setPreviewContent()
@@ -1191,6 +1245,28 @@ func (m *model) resize() {
 	}
 	if m.mode == modeCodeburn {
 		m.setCodeburnContent()
+	}
+	m.layoutWorkspace()
+}
+
+// reflowCurrentContent is needed when a repo view gives the shared viewport
+// sidebar space and the next screen takes the full width (or vice versa).
+func (m *model) reflowCurrentContent() {
+	switch m.mode {
+	case modeHelp:
+		offset := m.detailVP.YOffset
+		m.detailVP.SetContent(m.helpBody(m.detailVP.Width))
+		m.detailVP.SetYOffset(offset)
+	case modePreview:
+		m.setPreviewContent()
+	case modeStats:
+		offset := m.detailVP.YOffset
+		m.detailVP.SetContent(m.statsBody(m.detailVP.Width))
+		m.detailVP.SetYOffset(offset)
+	case modeCodeburn:
+		offset := m.detailVP.YOffset
+		m.setCodeburnContent()
+		m.detailVP.SetYOffset(offset)
 	}
 }
 
@@ -1206,15 +1282,14 @@ func (m model) View() string {
 	if m.intro != nil {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.intro.view(inner, max(1, m.height-2)))
 	}
+	if isWorkspaceMode(m.mode) {
+		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.workspaceView())
+	}
 	switch m.mode {
-	case modeDetail:
-		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.detailView(inner))
 	case modeEditor:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.editorView(inner), inner))
 	case modeBranch:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.branchView(inner), inner))
-	case modeSessions:
-		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.sessionsView(inner), inner))
 	case modeCommitMsg:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.commitMsgView(inner), inner))
 	case modeSessionSearch:
@@ -1225,8 +1300,6 @@ func (m model) View() string {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.overlayModal(m.touchedView(inner), inner))
 	case modePreview:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.previewView(inner))
-	case modeDiff:
-		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.diffView(inner))
 	case modeStats:
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.statsView(inner))
 	case modeCodeburn:

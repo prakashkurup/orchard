@@ -12,9 +12,10 @@ import (
 )
 
 type diffMsg struct {
-	path string
-	text string
-	err  error
+	request uint64
+	path    string
+	text    string
+	err     error
 }
 
 // openDiff shows the working-tree diff (vs HEAD) for a repo in a scrollable view.
@@ -23,13 +24,16 @@ func (m model) openDiff(r repo.Repo) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.diffRepo = r
+	m.beginWorkspace(r)
 	m.diffPath = ""
 	m.diffText = ""
 	m.returnMode = m.mode
 	m.mode = modeDiff
-	m.detailVP.SetContent(fillLine(subtleStyle.Render("  loading diff…"), m.detailVP.Width, bg))
+	m.diffLoading, m.diffErr = true, ""
+	m.diffRequest++
+	m.layoutWorkspace()
 	m.detailVP.GotoTop()
-	return m, diffCmd(r)
+	return m, diffCmd(r, m.diffRequest)
 }
 
 // openFileDiff shows the working-tree diff for a single file (vs HEAD), reusing
@@ -40,24 +44,38 @@ func (m model) openFileDiff(r repo.Repo, relPath string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.diffRepo = r
+	m.beginWorkspace(r)
 	m.diffPath = relPath
 	m.diffText = ""
 	m.returnMode = m.mode
 	m.mode = modeDiff
-	m.detailVP.SetContent(fillLine(subtleStyle.Render("  loading diff…"), m.detailVP.Width, bg))
+	m.diffLoading, m.diffErr = true, ""
+	m.diffRequest++
+	m.layoutWorkspace()
 	m.detailVP.GotoTop()
-	return m, diffCmd(r, relPath)
+	return m, diffCmd(r, m.diffRequest, relPath)
 }
 
-func diffCmd(r repo.Repo, pathspec ...string) tea.Cmd {
+func diffCmd(r repo.Repo, request uint64, pathspec ...string) tea.Cmd {
 	if demoMode() {
-		return func() tea.Msg { return diffMsg{path: r.Path, text: demoDiff()} }
+		return func() tea.Msg { return diffMsg{request: request, path: r.Path, text: demoDiff()} }
 	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		out, err := orchardgit.Diff(ctx, r.Path, pathspec...)
-		return diffMsg{path: r.Path, text: out, err: err}
+		return diffMsg{request: request, path: r.Path, text: out, err: err}
+	}
+}
+
+func (m *model) setDiffContent() {
+	switch {
+	case m.diffLoading:
+		m.detailVP.SetContent(fillLine(subtleStyle.Render("  loading diff…"), m.detailVP.Width, bg))
+	case m.diffErr != "":
+		m.detailVP.SetContent(fillLine(errorStyle.Render("  diff: "+cleanText(m.diffErr)), m.detailVP.Width, bg))
+	default:
+		m.detailVP.SetContent(colorizeDiff(m.diffText, m.detailVP.Width))
 	}
 }
 

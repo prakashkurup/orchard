@@ -68,6 +68,7 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "q", "enter", "backspace":
+		m.rememberWorkspaceView()
 		m.mode = modeList
 		m.detail = nil
 		m.status = ""
@@ -138,18 +139,17 @@ func (m model) openDetail() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	m.mode = modeDetail
-	m.detailRepo = r.Path
-	m.detail = nil
-	m.status = "loading " + r.Name
-	m.setDetailContent() // animated loading line (m.detail is nil); no gray band
-	return m, tea.Batch(detailCmd(r), m.spinner.Tick)
+	return m.activateWorkspaceRepo(r.Path)
 }
 
-func detailCmd(r repo.Repo) tea.Cmd {
+func detailCmd(r repo.Repo, requests ...uint64) tea.Cmd {
+	var request uint64
+	if len(requests) > 0 {
+		request = requests[0]
+	}
 	if demoMode() {
 		return func() tea.Msg {
-			return detailMsg{path: r.Path, info: demoDetail(r), langs: demoDetailLangs(r.Path), sessions: demoSessions(), commitsSince: 14, touched: demoTouched(), codexSessions: demoCodexSessions(), codexTouched: demoCodexTouched()}
+			return detailMsg{request: request, path: r.Path, info: demoDetail(r), langs: demoDetailLangs(r.Path), sessions: demoSessions(), commitsSince: 14, touched: demoTouched(), codexSessions: demoCodexSessions(), codexTouched: demoCodexTouched()}
 		}
 	}
 	return func() tea.Msg {
@@ -158,7 +158,7 @@ func detailCmd(r repo.Repo) tea.Cmd {
 		info, err := orchardgit.Detail(ctx, r)
 		sessions := claude.Sessions(r.Path, 10)
 		gst, gok, gmap := loadGraph(r.Path)
-		return detailMsg{path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, r.Path, sessions), touched: claude.TouchMap(r.Path, touchMapSessions), codexSessions: codex.Sessions(r.Path, 10), codexTouched: codex.TouchMap(r.Path, touchMapSessions), graph: gst, graphOK: gok, graphMap: gmap, err: err}
+		return detailMsg{request: request, path: r.Path, info: info, langs: lang.Detect(ctx, r.Path), sessions: sessions, commitsSince: commitsSinceClaude(ctx, r.Path, sessions), touched: claude.TouchMap(r.Path, touchMapSessions), codexSessions: codex.Sessions(r.Path, 10), codexTouched: codex.TouchMap(r.Path, touchMapSessions), graph: gst, graphOK: gok, graphMap: gmap, err: err}
 	}
 }
 
@@ -177,8 +177,12 @@ func commitsSinceClaude(ctx context.Context, path string, sessions []claude.Sess
 }
 
 func (m *model) setDetailContent() {
+	if m.mode != modeDetail {
+		return
+	}
+	offset := m.detailVP.YOffset
 	m.detailVP.SetContent(m.detailBody(m.detailVP.Width))
-	m.detailVP.GotoTop()
+	m.detailVP.SetYOffset(offset)
 }
 
 func (m model) detailBody(width int) string {
@@ -1073,7 +1077,7 @@ func (m model) detailView(width int) string {
 	// wholesale and newly added keys stay visible. esc/scroll lead; least-used trail.
 	hints := fillLine(packHints(width, []string{
 		cmdHint("esc", "back"), cmdHint("↑↓", "scroll"),
-		cmdHint("c", "claude"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
+		cmdHint("c", "agent"), cmdHint("C", "resume"), cmdHint("H", "sessions"),
 		cmdHint("f", "files"), cmdHint("v", "docs"), cmdHint("d", "diff"),
 		cmdHint("M", "commit msg"), cmdHint("I", "wire md"), cmdHint("b", "branch"),
 		cmdHint("p", "pull"), cmdHint("e", "editor"), cmdHint("O", "browser"), cmdHint("y", "copy path"),

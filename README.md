@@ -86,6 +86,7 @@ If you juggle many repositories and lean on Claude Code or Codex, orchard is the
 ## Features
 
 - **One-screen overview** of every repo: branch, clean/dirty/ahead/behind/diverged/detached, uncommitted + stash counts, dominant language, last-synced and last-commit times (color-coded by freshness).
+- **Persistent repo sidebar** in detail, diff, and session-history views: switch repos without losing your dashboard filters or selections, with remembered views and scroll positions for the current Orchard session.
 - **Agent aware (Claude Code + Codex)** - usage panel, a per-repo `AGENT` column marking each agent that ran, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code & Codex](#claude-code--codex) below.
 - **Code graph for agents** - build a SQLite symbol/call graph (`B` or `orchard graph build`) and serve it to Claude Code or Codex over MCP, including cross-repo sessions. See [Code Graph & MCP](#code-graph--mcp).
 - **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, and repos with no upstream (a non-fast-forward is reported, never forced).
@@ -176,6 +177,18 @@ In the TUI, `B` builds selected repo graphs, `D` deletes graph caches, and `m` t
 ## TUI keys
 
 Press `?` in-app for the same keymap and legend.
+
+### Repo workspace sidebar
+
+Opening a repo (`enter`), diff (`d`), or session history (`H`) keeps a compact repo list alongside the content. It shows each repo's branch, `*` for uncommitted changes, and the age of its latest Claude/Codex activity. Activity ages describe local history, not a confirmed running or blocked agent state.
+
+- `tab` moves focus between the sidebar and content. With sidebar focus, `↑ ↓` / `j k` select a repo and `enter` opens it; clicking a repo opens it directly.
+- `[` / `]` open the previous / next repo, also when the sidebar is collapsed.
+- `\` hides or shows the sidebar. It automatically collapses below 106 terminal columns or 12 rows, and reappears when there is room unless you hid it manually.
+- Switching repos restores their last detail/diff/session view, scroll position, and session selection during the current Orchard process. Sidebar order stays fixed during a workspace visit, even when repo status refreshes.
+- `esc` first leaves sidebar focus; from content it goes back. Returning to the dashboard preserves its filter, cursor, scroll position, and bulk selections.
+
+Claude Code and Codex still launch in an external terminal tab/window, with the existing in-place fallback. The sidebar is visible in Orchard's own repo views; it does not embed or manage agent terminals.
 
 ### Navigate and select
 

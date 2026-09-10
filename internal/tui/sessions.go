@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
 	"github.com/prakashkurup/orchard/internal/codex"
 	"github.com/prakashkurup/orchard/internal/repo"
@@ -13,6 +15,7 @@ import (
 const sessionsLimit = 50
 
 type sessionsMsg struct {
+	request  uint64
 	path     string
 	sessions []claude.Session
 }
@@ -29,26 +32,29 @@ func (m model) openSessions(r repo.Repo) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sessionsRepo = r
+	m.beginWorkspace(r)
 	m.sessions = nil
 	m.sessionCursor = 0
 	m.sessionsLoading = true
 	m.returnMode = m.mode
 	m.mode = modeSessions
-	return m, sessionsCmd(r, m.assistantIsCodex())
+	m.sessionsRequest++
+	m.layoutWorkspace()
+	return m, sessionsCmd(r, m.assistantIsCodex(), m.sessionsRequest)
 }
 
-func sessionsCmd(r repo.Repo, useCodex bool) tea.Cmd {
+func sessionsCmd(r repo.Repo, useCodex bool, request uint64) tea.Cmd {
 	if demoMode() {
 		if useCodex {
-			return func() tea.Msg { return sessionsMsg{path: r.Path, sessions: demoCodexSessions()} }
+			return func() tea.Msg { return sessionsMsg{request: request, path: r.Path, sessions: demoCodexSessions()} }
 		}
-		return func() tea.Msg { return sessionsMsg{path: r.Path, sessions: demoSessions()} }
+		return func() tea.Msg { return sessionsMsg{request: request, path: r.Path, sessions: demoSessions()} }
 	}
 	return func() tea.Msg {
 		if useCodex {
-			return sessionsMsg{path: r.Path, sessions: codex.Sessions(r.Path, sessionsLimit)}
+			return sessionsMsg{request: request, path: r.Path, sessions: codex.Sessions(r.Path, sessionsLimit)}
 		}
-		return sessionsMsg{path: r.Path, sessions: claude.Sessions(r.Path, sessionsLimit)}
+		return sessionsMsg{request: request, path: r.Path, sessions: claude.Sessions(r.Path, sessionsLimit)}
 	}
 }
 
@@ -76,49 +82,35 @@ func (m model) handleSessionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) sessionsView(width int) string {
-	fg := panelFG
-	inner := clamp(width-16, 44, 88)
-	return modalBox(inner, func(add func(string)) {
-		add(fg(claudeC).Bold(true).Render("✦ Claude Code sessions") + fg(muted).Render("  · "+m.sessionsRepo.Name))
-		add("")
-		switch {
-		case m.sessionsLoading:
-			add(fg(muted).Render("  loading sessions…"))
-		case len(m.sessions) == 0:
-			add(fg(muted).Render("  no Claude Code sessions in this repo yet"))
-		default:
-			const maxRows = 12
-			start := 0
-			if m.sessionCursor >= maxRows {
-				start = m.sessionCursor - maxRows + 1
+// The workspace history is a full-height list alongside repo navigation.
+func (m model) workspaceSessionsView(width int) string {
+	label, color := "Claude Code", claudeC
+	if m.assistantIsCodex() {
+		label, color = "Codex", codexC
+	}
+	rows := []string{fillLine(segB(color, " "+label+" sessions")+seg(muted, " · "+cleanText(m.sessionsRepo.Name)), width, bg), hrule(width)}
+	available := max(1, m.height-8)
+	switch {
+	case m.sessionsLoading:
+		rows = append(rows, fillLine(seg(muted, "  loading sessions…"), width, bg))
+	case len(m.sessions) == 0:
+		rows = append(rows, fillLine(seg(muted, "  no "+label+" sessions in this repo yet"), width, bg))
+	default:
+		start := max(0, m.sessionCursor-available+1)
+		for i := start; i < min(start+available, len(m.sessions)); i++ {
+			s := m.sessions[i]
+			marker, fg := "  ", ice
+			if i == m.sessionCursor {
+				marker, fg = "▌ ", color
 			}
-			end := min(start+maxRows, len(m.sessions))
-			// fixed columns so title / model+turns / age line up across rows
-			const relW, metaW = 10, 26
-			titleW := max(12, inner-4-1-metaW-3-relW)
-			for i := start; i < end; i++ {
-				s := m.sessions[i]
-				cursor := fg(panel).Render("  ")
-				titleStyle := fg(ice)
-				if i == m.sessionCursor {
-					cursor = fg(claudeC).Bold(true).Render("▌ ")
-					titleStyle = fg(selFg).Bold(true)
-				}
-				model := claude.PrettyModel(s.Model)
-				if model == "" {
-					model = "claude"
-				}
-				meta := fmt.Sprintf("%s · %dt · %s", model, s.Assistant, humanTokens(s.Tokens))
-				add(cursor +
-					titleStyle.Render(padRight(fit(s.DisplayTitle(), titleW), titleW)) +
-					fg(muted).Render(" "+padRight(fit(meta, metaW), metaW)+" · "+fit(relTime(s.Modified), relW)))
-			}
-			if len(m.sessions) > maxRows {
-				add(fg(muted).Render(fmt.Sprintf("  … %d more", len(m.sessions)-maxRows)))
-			}
+			meta := fmt.Sprintf("%dt · %s", s.Assistant, relTime(s.Modified))
+			titleW := max(1, width-3-lipgloss.Width(meta))
+			rows = append(rows, fillLine(seg(fg, marker+padRight(s.DisplayTitle(), titleW))+seg(muted, " "+meta), width, bg))
 		}
-		add("")
-		add(fg(muted).Render("↑↓ move · ⏎ resume · esc cancel"))
-	})
+	}
+	for len(rows) < available+2 {
+		rows = append(rows, fillLine("", width, bg))
+	}
+	rows = append(rows, hrule(width), fillLine(packHints(width, []string{cmdHint("↑↓", "session"), cmdHint("enter", "resume"), cmdHint("esc", "back")}, nil), width, bg))
+	return strings.Join(rows, "\n")
 }
