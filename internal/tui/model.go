@@ -1278,6 +1278,10 @@ func (m model) innerWidth() int {
 }
 
 func (m model) View() string {
+	return paintCanvas(m.renderView())
+}
+
+func (m model) renderView() string {
 	inner := m.innerWidth()
 	if m.intro != nil {
 		return appStyle.Width(inner + 4).Height(max(1, m.height)).Render(m.intro.view(inner, max(1, m.height-2)))
