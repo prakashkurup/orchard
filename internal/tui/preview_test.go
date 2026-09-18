@@ -40,6 +40,16 @@ func TestRenderMarkdownWidthSafe(t *testing.T) {
 	}
 }
 
+func TestMarkdownUsesOrchardBackground(t *testing.T) {
+	out := renderMarkdown("# title\n\nparagraph\n\n```go\nfmt.Println(\"hi\")\n```", 80)
+	if strings.Contains(out, "48;2;26;27;38") {
+		t.Fatal("Tokyo Night document background leaked into Orchard markdown")
+	}
+	if !strings.Contains(out, "48;2;21;22;31") {
+		t.Fatal("markdown does not paint Orchard's background")
+	}
+}
+
 func TestPreviewFlow(t *testing.T) {
 	t.Setenv("ORCHARD_DEMO", "1")
 	m := newModel("root", 4)

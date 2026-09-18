@@ -22,7 +22,7 @@ const (
 	muted     = "#767DA8" // comment gray - dim text, separators (brighter, less washed)
 	ice       = "#D5DAF2" // foreground (bright for contrast)
 	bg        = "#15161F" // app background (deep slate)
-	panel     = "#20243A" // elevated chips / modals
+	panel     = bg        // modals use the app canvas; borders provide elevation
 	panelDark = "#0F1016" // grid header / darkest
 	rowAlt    = "#1B1E2C" // zebra row
 	rowHot    = "#3E54AE" // selected row (vivid indigo - ties blue + purple)
@@ -81,6 +81,92 @@ func fillLine(s string, width int, bgc string) string {
 		Width(width).
 		MaxWidth(width).
 		Render(s)
+}
+
+// paintCanvas restores the Orchard canvas before any printable cell whose ANSI
+// state has fallen back to the terminal default. Nested Lip Gloss and Glamour
+// fragments emit resets independently; without this final pass, a raw padding
+// space after one of those resets appears as a rectangular terminal-color gap.
+func paintCanvas(s string) string {
+	styledSpace := lipgloss.NewStyle().Background(lipgloss.Color(bg)).Render(" ")
+	spaceAt := strings.IndexByte(styledSpace, ' ')
+	if spaceAt <= 0 { // no color profile: the terminal has no background styling to restore
+		return s
+	}
+	canvas := styledSpace[:spaceAt]
+
+	var out strings.Builder
+	out.Grow(len(s) + len(s)/16)
+	painted := false
+	for i := 0; i < len(s); {
+		if s[i] == '\x1b' {
+			next, sgr, ok := ansiEscape(s, i)
+			if ok {
+				out.WriteString(s[i:next])
+				if sgr != "" || (next >= 3 && s[next-1] == 'm') {
+					painted = sgrBackgroundState(painted, sgr)
+				}
+				i = next
+				continue
+			}
+		}
+		b := s[i]
+		if b >= 0x20 && b != 0x7f && !painted {
+			out.WriteString(canvas)
+			painted = true
+		}
+		out.WriteByte(b)
+		i++
+	}
+	// Do not leave the caller's terminal with Orchard's background selected.
+	out.WriteString("\x1b[0m")
+	return out.String()
+}
+
+func ansiEscape(s string, start int) (next int, sgr string, ok bool) {
+	if start+1 >= len(s) {
+		return start + 1, "", false
+	}
+	switch s[start+1] {
+	case '[':
+		for i := start + 2; i < len(s); i++ {
+			if s[i] >= 0x40 && s[i] <= 0x7e {
+				if s[i] == 'm' {
+					return i + 1, s[start+2 : i], true
+				}
+				return i + 1, "", true
+			}
+		}
+	case ']':
+		for i := start + 2; i < len(s); i++ {
+			if s[i] == '\a' {
+				return i + 1, "", true
+			}
+			if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+				return i + 2, "", true
+			}
+		}
+	}
+	return start + 1, "", false
+}
+
+func sgrBackgroundState(current bool, sgr string) bool {
+	if sgr == "" {
+		return false
+	}
+	for _, part := range strings.Split(sgr, ";") {
+		p, err := strconv.Atoi(part)
+		if err != nil {
+			continue
+		}
+		switch {
+		case p == 0 || p == 49:
+			current = false
+		case p >= 40 && p <= 47, p >= 100 && p <= 107, p == 48:
+			current = true
+		}
+	}
+	return current
 }
 
 // hrule renders a full-width horizontal separator in the header-rule style.

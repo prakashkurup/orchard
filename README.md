@@ -15,8 +15,7 @@ An agent-aware, multi-repo terminal dashboard. See every local git repo on one s
   - A [Nerd Font](https://www.nerdfonts.com/) for the icons (any other monospace font works; icons just render as boxes).
   - [`gh`](https://cli.github.com/) (GitHub CLI) - used by `orchard clone --org` for auth if `GITHUB_TOKEN` isn't set.
   - [`claude`](https://claude.com/claude-code) and/or [`codex`](https://developers.openai.com/codex/cli) - for the agent keys (`c`, `C`, `H`, `R`, `A`, `M`); activity always shows from local history either way.
-  - [`ast-grep`](https://ast-grep.github.io/) - optional parser backend for Kotlin, TypeScript/TSX, Ruby, C#, Python, JavaScript, C, and C++; orchard can install a pinned copy with `orchard graph install-ast-grep`.
-  - A supported terminal for new-tab launches: Ghostty, iTerm2, WezTerm, tmux, or macOS Terminal (otherwise it falls back to running in place).
+  - A supported terminal for new-tab launches: Ghostty, iTerm2, WezTerm, tmux, or macOS Terminal. Ghostty, iTerm2, WezTerm, and tmux open in the current window; unsupported terminals can run the agent in Orchard's tab.
 
 ### Download a release (no Go required)
 
@@ -68,7 +67,6 @@ orchard --root ~/Documents/GitHub     # or point it at any folder
 orchard preview                       # render one dashboard frame to stdout
 orchard scan --root ~/code --json     # machine-readable status of every repo
 orchard pull --root ~/code --all      # fast-forward every eligible repo
-orchard graph build --repo ./api      # build a local code graph for an agent
 ```
 
 `orchard` scans **one root folder** and treats each immediate subdirectory that contains a `.git` as a repository. (If the root itself is a repo, it shows just that one.)
@@ -86,11 +84,11 @@ If you juggle many repositories and lean on Claude Code or Codex, orchard is the
 ## Features
 
 - **One-screen overview** of every repo: branch, clean/dirty/ahead/behind/diverged/detached, uncommitted + stash counts, dominant language, last-synced and last-commit times (color-coded by freshness).
+- **Persistent repo sidebar** in detail, diff, and session-history views: switch repos without losing your dashboard filters or selections, with remembered views and scroll positions for the current Orchard session.
 - **Agent aware (Claude Code + Codex)** - usage panel, a per-repo `AGENT` column marking each agent that ran, launch/resume/cross-repo sessions, and a flag for uncommitted AI work. See [Claude Code & Codex](#claude-code--codex) below.
-- **Code graph for agents** - build a SQLite symbol/call graph (`B` or `orchard graph build`) and serve it to Claude Code or Codex over MCP, including cross-repo sessions. See [Code Graph & MCP](#code-graph--mcp).
 - **Safe bulk pull** - fast-forward only; skips dirty repos, detached HEADs, and repos with no upstream (a non-fast-forward is reported, never forced).
 - **Fetch, branch switch, multi-select** - act on one repo or many at once.
-- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or your agent (`c`) in a new terminal tab; multi-repo actions ask for confirmation first.
+- **Open anywhere** - launch your editor (`e`), the repo in your browser (`O`), or configure your agent (`c`) for this tab or a new terminal tab; multi-repo agent launches use one tab per repo.
 - **Cross-repo code search** (`S`) that respects `.gitignore`.
 - **Preview docs** (`v`) - render a repo's `CLAUDE.md` / `AGENTS.md` / `README.md` in the terminal, with its size and an estimated per-session token cost.
 - **GitHub aware** - open PR count and CI status per repo (when a token is set), shown in the detail view, with a failing-CI flag on the dashboard.
@@ -102,21 +100,19 @@ If you juggle many repositories and lean on Claude Code or Codex, orchard is the
 
 orchard treats AI coding agents as a first-class part of a multi-repo workflow, with the same treatment for **Claude Code** and **OpenAI Codex**. Everything is read locally from your `~/.claude` transcripts (or `$CLAUDE_CONFIG_DIR`) and your `~/.codex` session rollouts (or `$CODEX_HOME`); nothing is sent anywhere.
 
-The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set, else the first of `claude` / `codex` on your `PATH`. The dashboard's `AGENT` column marks each agent that has run in a repo (both marks when you used both), and repos worked with both agents show both footprints side by side in the detail view.
+The `c` launch sheet offers every installed assistant, or the explicit `$ORCHARD_AI_CMD` when set. The selected assistant becomes the default for resume and related actions. The dashboard's `AGENT` column marks each agent that has run in a repo (both marks when you used both), and repos worked with both agents show both footprints side by side in the detail view.
 
 ### See activity
 
 - **Local activity fallback** pinned under the list when CodeBurn is unavailable or disabled: per-agent all-history totals, model split, and busiest repos.
 - **Agent usage, powered by CodeBurn** (optional): a project-root-scoped cost strip plus a native usage dashboard (`U`) for daily activity, projects, models, activities, providers, tools, MCP servers, skills, agents, and workflow metrics. See [CodeBurn integration](docs/codeburn.md).
 - **Per-repo `AGENT` column**: a mark for each agent that ran in the repo (both when you used both), with the freshest run age colored by recency.
-- **Active now**: a session writing in the last ~60s shows `live` (green); if that repo is also dirty it shows `!live` (red), so live AI work on an uncommitted tree stands out.
-- **Per-repo footprint in the detail view** (`enter`): each agent's recent sessions, turns, tokens, and last run, side by side when both have worked the repo.
+- **Active now**: Orchard refreshes local agent activity every five seconds. A session writing in the last ~60s shows `live` (green) in both the dashboard and repo sidebar; if that repo is also dirty the dashboard shows `!live` (red).
+- **Per-repo activity in the detail view** (`enter`): a compact session, turn, token, and last-run summary for each agent that worked in the repo.
 - **Files the agent touched** (detail view): what it read or edited here, edited-first, with files it changed but hasn't committed flagged. Press `f` for the full list, then `enter` to open one in your editor or `d` to diff just that file.
 - **Uncommitted-work flag**: when a repo is dirty *and* an agent ran there recently, the `AGENT` cell turns red with a `!`, so AI edits never get lost in an unstaged tree.
 - **Sort by agent** (`s`): float the most recently agent-worked repos to the top.
 - **Stats** (`T` / `orchard stats`): totals per agent, plus Claude and Codex activity heatmaps alongside the commit harvest.
-
-![the repo detail view: languages, the Claude Code section (activity, context, recent sessions, and the files Claude touched), GitHub PRs, the working tree, and the commit graph](docs/screenshots/details.png)
 
 ![the Files view (`f`): every file Claude read or edited in a repo, edited first, with uncommitted ones flagged; open one in your editor or diff just that file](docs/screenshots/files.png)
 
@@ -128,7 +124,7 @@ The action keys drive whichever assistant is resolved: `$ORCHARD_AI_CMD` if set,
 
 ### Launch across repos
 
-- **Launch** (`c`): open the agent in a new terminal tab for the selected repo(s); multi-repo asks for confirmation.
+- **Launch options** (`c`): choose Claude Code or Codex, run it in Orchard's current tab or a new terminal tab, select default / plan / workspace access, and optionally provide a model and starting prompt. Orchard returns when an in-place agent exits. Multiple selected repos open one configured tab each.
 - **Across repos** (`A`): one session spanning the selected repos, opened in the first with the rest attached via `--add-dir`, for cross-service work. `space`-select 2+ first. With Claude Code, each added repo's `CLAUDE.md` is loaded too (orchard sets `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; opt out with `ORCHARD_ADDDIR_MEMORY=0`), so the session has the *instructions* for every repo, not just file access.
 - **Workspace presets** (`W`): save a `space`-selected repo set under a name, then launch the cross-repo `A` session on it in one keystroke, for the groups of services you keep working on together. Stored in `presets.json` (see [Files orchard writes](#files-orchard-writes)).
 
@@ -157,25 +153,21 @@ The usage panel and `AGENT` column reflect repos you have **actually run an agen
 - **Relocated config?** orchard reads `~/.claude` (or `$CLAUDE_CONFIG_DIR`) and `~/.codex` (or `$CODEX_HOME`).
 - **The `c` launcher is missing?** orchard needs `claude` or `codex` on your `PATH` (a shell alias or function does not count) or `ORCHARD_AI_CMD=/full/path/to/the/binary`. GUI launches often have a thinner `PATH` than your terminal.
 
-## Code Graph & MCP
-
-orchard can build a local code graph for a repo: files, symbols, signatures, call edges, PageRank importance, and freshness metadata stored in SQLite. Claude Code and Codex can query that graph over MCP instead of burning context on broad greps and whole-file reads.
-
-The graph is intentionally local and read-only. Responses include signatures and file/line locations, not function bodies. Go uses the standard library parser for precise results; non-Go languages use `ast-grep` when available, with quality tiers surfaced as `precise`, `good`, or `best-effort` so you know when the graph is a guide versus when to open the file.
-
-Useful commands:
-
-- `orchard graph install-ast-grep` downloads orchard's pinned, checksum-verified ast-grep binary into the orchard config dir.
-- `orchard graph build --repo PATH` builds or refreshes a repo graph.
-- `orchard graph status --repo PATH` shows freshness, size, stale state, and parser-quality tiers.
-- `orchard graph map|find|callers|blast|search --repo PATH NAME` queries the graph from the CLI.
-- `orchard mcp --repo A --repo B` serves one merged MCP view across multiple repos. Startup indexing runs in the background; the MCP `status` tool reports `indexing` and any last error.
-
-In the TUI, `B` builds selected repo graphs, `D` deletes graph caches, and `m` toggles automatic MCP wiring for launches. The `GR` column shows `●` fresh, `◐` stale, or blank when no useful graph exists. When wiring is enabled, launching Claude Code or Codex merges an `orchard` MCP server into the project config for the repo set you are launching.
-
 ## TUI keys
 
 Press `?` in-app for the same keymap and legend.
+
+### Repo workspace sidebar
+
+Opening a repo (`enter`), diff (`d`), or session history (`H`) keeps a compact repo list alongside the content. It shows each repo's branch, `*` for uncommitted changes, and the age of its latest Claude/Codex activity. A colored `Claude live` or `Codex live` marker appears while that agent's local session is actively writing. This is activity-based monitoring rather than a process or blocked-state guarantee.
+
+- `tab` moves focus between the sidebar and content. With sidebar focus, `↑ ↓` / `j k` select a repo and `enter` opens it; clicking a repo opens it directly.
+- `[` / `]` open the previous / next repo, also when the sidebar is collapsed.
+- `\` hides or shows the sidebar. It automatically collapses below 106 terminal columns or 12 rows, and reappears when there is room unless you hid it manually.
+- Switching repos restores their last detail/diff/session view, scroll position, and session selection during the current Orchard process. Sidebar order stays fixed during a workspace visit, even when repo status refreshes.
+- `esc` first leaves sidebar focus; from content it goes back. Returning to the dashboard preserves its filter, cursor, scroll position, and bulk selections.
+
+The `c` launch sheet can suspend Orchard and run a single agent in the same terminal tab. Its new-tab choice keeps Orchard visible and opens the agent in the current terminal window where the terminal exposes that capability. Orchard does not embed a second full-screen terminal emulator inside its Bubble Tea screen.
 
 ### Navigate and select
 
@@ -192,7 +184,7 @@ Press `?` in-app for the same keymap and legend.
 
 | Key | Action |
 |-----|--------|
-| `enter` | repo detail (languages, instructions, code graph, GitHub PR/CI, agent footprints, working tree, commit graph, remotes) |
+| `enter` | repo detail (project status, actionable attention, AI activity, working tree, recent commits, GitHub PR/CI, remotes) |
 | `d` | view the working-tree diff (vs HEAD) |
 | `p` / `P` | pull selected / all (fast-forward only) |
 | `f` / `F` | fetch selected / all |
@@ -205,7 +197,7 @@ Press `?` in-app for the same keymap and legend.
 
 | Key | Action |
 |-----|--------|
-| `c` | open the agent (Claude Code / Codex) in a new tab (confirms for >1 repo) |
+| `c` | configure and launch Claude Code / Codex (agent, tab placement, access, model, and prompt) |
 | `C` | resume the agent's last session in the current repo |
 | `H` | browse the agent's past sessions for the current repo and resume any one |
 | `R` | search the *content* of past sessions across all repos, then resume one |
@@ -214,14 +206,6 @@ Press `?` in-app for the same keymap and legend.
 | `I` | wire `AGENTS.md` into a new `CLAUDE.md` for the selected repos (so Claude reads it) |
 | `W` | workspace presets: save a repo set, then launch a cross-repo session (`A`) on it |
 | `v` | preview a repo's `CLAUDE.md` / `AGENTS.md` / `README.md`, rendered, with size and est. token cost |
-
-### Code graph actions
-
-| Key | Action |
-|-----|--------|
-| `B` | build or refresh the code graph for the current selection |
-| `D` | delete the selected repo graph cache |
-| `m` | toggle automatic MCP graph wiring for agent launches |
 
 ### Search, stats, and filtering
 
@@ -252,8 +236,6 @@ orchard [--config PATH] clone   [flags]  clone scoped GitHub org repos
 orchard [--config PATH] preview [flags]  render the dashboard once
 orchard [--config PATH] config           show resolved configuration
 orchard [--config PATH] stats            summarize the orchard
-orchard graph <subcommand> [flags]       build/query a repo code graph
-orchard mcp [--repo PATH ...]            serve code graphs to AI agents
 orchard update                           update orchard to the latest release
 orchard version                          print the version
 orchard help
@@ -265,8 +247,6 @@ Common flags: `--root PATH`, `--concurrency N`. `--json` is supported by `scan`,
 - `pull` - `--all` **or** `--match RE`, `--root`, `--concurrency`, `--json`
 - `clone` - `--org` and `--match RE` (both required, so you never clone a whole org by accident), `--include-archived`, `--root`, `--concurrency`, `--json`
 - `preview` - `--root`, `--concurrency`, `--width`, `--height`, `--group`, `--detail NAME`
-- `graph` - `build`, `delete`, `status`, `map`, `find`, `callers`, `blast`, `search`, `install-ast-grep`
-- `mcp` - repeat `--repo PATH` for a merged cross-repo graph; use `--no-build` to skip startup refresh
 
 ## Configuration
 
@@ -290,8 +270,6 @@ The `orchard config` **command** doesn't change anything: it prints the resolved
 - `ORCHARD_AI_CMD` - explicit agent command for the agent keys (otherwise the first of `claude` / `codex` on `PATH`).
 - `GITHUB_TOKEN` - token for `orchard clone` (falls back to `gh auth token`).
 - `ORCHARD_ADDDIR_MEMORY` - set to `0` to stop a cross-repo Claude session (`A`) from loading the added repos' `CLAUDE.md` (on by default).
-- `ORCHARD_GRAPH_MCP` - set to `0` to disable automatic graph MCP wiring when launching an agent.
-- `ORCHARD_AST_GREP_PATH` - explicit path to an ast-grep/sg binary; otherwise orchard prefers its managed pinned copy, then `PATH`.
 - `ORCHARD_NO_UPDATE_CHECK` - set to `1` to disable the daily check for a newer release.
 - `ORCHARD_NO_MOUSE` - set to `1` to disable mouse capture (so your terminal's native text selection works).
 - `ORCHARD_FETCH_SECS` - while live refresh is on, how often (seconds) to fetch remotes in the background so ahead/behind stay current. Default `300` (5 min); `0` disables background fetching (fetch on demand with `f` / `F`).
@@ -320,12 +298,8 @@ Beyond the optional `config.yaml`, orchard keeps a little state under your confi
 - `presets.json` - your workspace presets (`W`).
 - `seen.json` - the last time you visited each repo, for the `n` "new commits since last visit" jump.
 - `editor` - your chosen default editor (`E`).
-- `graph/*.db` - per-repo code graph SQLite databases, plus SQLite WAL/SHM sidecars while open.
-- `bin/ast-grep` / `bin/sg` - orchard's managed parser backend when installed with `orchard graph install-ast-grep`.
 
 These are plain, hand-editable files that orchard owns. Reads are **fail-soft**: if one is missing or corrupt, orchard falls back to a safe default (no presets, no last-visit, the editor picker) instead of erroring, and the next save rewrites it. The daily update check also caches its last result under your home cache dir. A malformed `config.yaml`, by contrast, is reported at startup, since that is configuration you declared on purpose.
-
-When graph MCP wiring is enabled, orchard may also merge an `orchard` server entry into a project's `.mcp.json` for Claude Code and `.codex/config.toml` for Codex. It owns only that server entry/table and preserves unrelated settings.
 
 ## Security & privacy
 
@@ -333,7 +307,6 @@ orchard runs locally with no telemetry. Network traffic only happens when you as
 
 - `git` talking to your remotes (fetch / pull / clone).
 - the **GitHub API** for open-PR and CI status, and for `orchard clone`.
-- `orchard graph install-ast-grep`, which downloads a pinned ast-grep release zip from GitHub, verifies its SHA-256, and stores the binary locally.
 - **your agent (Claude Code / Codex)**, when you launch it (`c` / `C` / `H` / `A`) or draft a commit message (`M`, which runs `claude -p` or `codex exec` and sends the working-tree diff to the agent). The usage panel, `AGENT` column, and stats only **read** your local `~/.claude` transcripts and `~/.codex` rollouts - nothing is sent for those.
 - the **update check** - one anonymous request to the GitHub releases API, at most once a day (disable with `ORCHARD_NO_UPDATE_CHECK=1`).
 
@@ -341,7 +314,6 @@ Privacy details:
 
 - The GitHub token is read from `GITHUB_TOKEN` or `gh auth token` at the moment it's needed; it is **never written to disk or printed**, and tokens embedded in a remote URL are stripped before the URL is shown or opened.
 - Pulls are **fast-forward only** and skip dirty repos - orchard never force-pushes, rebases, or discards work, and it never commits or pushes on your behalf.
-- The graph MCP server is local stdio only, read-only, and returns graph metadata (names, signatures, paths, line numbers), not source file bodies.
 
 See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
@@ -359,7 +331,7 @@ make cover       # HTML coverage report
 make help        # list all targets
 ```
 
-The codebase is split into small packages under `internal/` (`tui`, `git`, `github`, `repo`, `config`, `editor`, `lang`, `search`, `seen`, `termlaunch`, `claude`, `graph`, `mcp`, `agentcfg`) with a thin `main.go` CLI. The logic lives in the unit-tested packages; the TUI is a Bubble Tea layer on top.
+The codebase is split into small packages under `internal/` (`tui`, `git`, `github`, `repo`, `config`, `editor`, `lang`, `search`, `seen`, `termlaunch`, `claude`, `codex`) with a thin `main.go` CLI. The logic lives in the unit-tested packages; the TUI is a Bubble Tea layer on top.
 
 ### Cutting a release
 

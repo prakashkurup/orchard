@@ -117,7 +117,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "O":
 		return m.requestBrowser(m.selectionTargets())
 	case "c":
-		return m.requestClaude(m.selectionTargets())
+		return m.openAgentLauncher(m.selectionTargets())
 	case "C":
 		if r, ok := m.currentRepo(); ok {
 			return m.openClaudeResume(r)
@@ -150,22 +150,6 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openCodeburn()
 	case "I":
 		return m.requestWire(m.selectionTargets())
-	case "B":
-		targets := m.selectionTargets()
-		if len(targets) == 0 {
-			m.status = "nothing to build"
-			return m, nil
-		}
-		return m.startGraphBuild(targets)
-	case "D":
-		targets := m.selectionTargets()
-		if len(targets) == 0 {
-			m.status = "nothing to delete"
-			return m, nil
-		}
-		return m.deleteGraph(targets)
-	case "m":
-		return m.toggleGraphWiring()
 	case "R":
 		return m.openSessionSearch()
 	case "W":
@@ -261,9 +245,6 @@ func (m model) headerView(width int) string {
 	case m.loading:
 		statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Background(lipgloss.Color(bg)).Bold(true).
 			Render(fit(m.spinnerOrSync()+" "+m.status, avail))
-	case m.graphBuilding:
-		statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Background(lipgloss.Color(bg)).Bold(true).
-			Render(fit(m.spinner.View()+" "+m.status, avail))
 	case m.status != "":
 		statusStyled = statusStyle.Render(fit(m.status, avail))
 	}
@@ -303,9 +284,6 @@ func (m model) modeIndicators() string {
 	}
 	if m.grouped {
 		parts = append(parts, "grouped")
-	}
-	if m.graphWireSuppressed() {
-		parts = append(parts, "graph wiring off")
 	}
 	// shown/total when a filter is hiding repos
 	shown := 0
@@ -387,7 +365,6 @@ func (m model) gridHeader(width int) string {
 	cells := []string{
 		padRight("SEL", layout.sel),
 		padRight("ST", layout.st),
-		padRight("GR", layout.graph),
 		padRight("REPOSITORY", layout.name),
 		padRight("BRANCH", layout.branch),
 		padRight("LANG", layout.lang),
@@ -423,7 +400,7 @@ func (m model) footerView(width int) string {
 		if m.assistantCmd != "" {
 			opts = append(opts, cmdHint("A", fmt.Sprintf("%s ×%d", m.assistantLabel, n)), cmdHint("M", "commit msg"), cmdHint("I", "wire md"))
 		}
-		opts = append(opts, cmdHint("B", "graph"), cmdHint("x", "clear"))
+		opts = append(opts, cmdHint("x", "clear"))
 		line = fillLine(lead+packHints(width-lipgloss.Width(lead), opts, []string{cmdHint("?", "help")}), width, bg)
 	default:
 		opts := []string{cmdHint("⏎", "detail")}
@@ -433,7 +410,7 @@ func (m model) footerView(width int) string {
 		opts = append(opts,
 			cmdHint("p", "pull"), cmdHint("/", "filter"), cmdHint("tab", "quick filter"),
 			cmdHint("space", "select"), cmdHint("s", "sort"), cmdHint("d", "diff"), cmdHint("v", "docs"),
-			cmdHint("B", "graph"), cmdHint("S", "search"), cmdHint("R", "find sessions"), cmdHint("U", "cost"), cmdHint("T", "stats"), cmdHint("L", "worklog"),
+			cmdHint("S", "search"), cmdHint("R", "find sessions"), cmdHint("U", "cost"), cmdHint("T", "stats"), cmdHint("L", "worklog"),
 		)
 		line = fillLine(packHints(width, opts, []string{cmdHint("?", "help"), cmdHint("q", "quit")}), width, bg)
 	}
@@ -505,7 +482,7 @@ func (m model) renderGrid(width int) string {
 		current := vi == m.cursor
 		alt := rowIdx%2 == 1
 		pulling := m.pulling[r.Path]
-		lines = append(lines, renderRow(r, m.selected[r.Path], current, alt, pulling, m.spinner.View(), m.newByPath[r.Path], m.langByPath[r.Path], m.ghStatus[r.Path].CIState == "failing", m.pulses[r.Path], m.graphBuilding && m.graphBuildingPath == r.Path, m.graphStates[r.Path], layout))
+		lines = append(lines, renderRow(r, m.selected[r.Path], current, alt, pulling, m.spinner.View(), m.newByPath[r.Path], m.langByPath[r.Path], m.ghStatus[r.Path].CIState == "failing", m.pulses[r.Path], layout))
 		rowIdx++
 	}
 	return strings.Join(lines, "\n")
@@ -528,12 +505,12 @@ func renderRows(repos []repo.Repo, selected map[string]bool, cursor, width int) 
 	layout := gridLayout(width)
 	lines := make([]string, 0, len(repos))
 	for i, r := range repos {
-		lines = append(lines, renderRow(r, selected[r.Path], i == cursor, i%2 == 1, false, "", 0, lang.Stat{}, false, 0, false, graphBadgeNone, layout))
+		lines = append(lines, renderRow(r, selected[r.Path], i == cursor, i%2 == 1, false, "", 0, lang.Stat{}, false, 0, layout))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, newCount int, lng lang.Stat, ghFailing bool, pulse int, building bool, badge graphBadgeState, layout gridColumns) string {
+func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, newCount int, lng lang.Stat, ghFailing bool, pulse int, layout gridColumns) string {
 	info := r.LastCommit
 	if r.SkipReason != "" {
 		info = r.SkipReason
@@ -597,25 +574,9 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 		langText, langColor = glyph, lng.Color
 	}
 
-	// GR: code-graph badge — spinner while building, then ● fresh (built at HEAD,
-	// clean) / ◐ stale (HEAD moved or tree dirty) / blank when none.
-	graphText, graphColor := "", muted
-	switch {
-	case building:
-		graphText, graphColor = strings.TrimSpace(spin), accent
-		if graphText == "" {
-			graphText = "⠿"
-		}
-	case badge == graphBadgeFresh:
-		graphText, graphColor = "●", green
-	case badge == graphBadgeStale:
-		graphText, graphColor = "◐", yellow
-	}
-
 	styles := []lipgloss.Style{
 		cellStyle(selectionColor(selected), bgColor, current),
 		cellStyle(stColor, bgColor, true),
-		cellStyle(graphColor, bgColor, false),
 		cellStyle(nameColor, bgColor, current || newCount > 0),
 		cellStyle(branchCol, bgColor, current),
 		cellStyle(langColor, bgColor, false),
@@ -628,7 +589,6 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 	cells := []string{
 		padRight(selectionText(selected), layout.sel),
 		padRight(stText, layout.st),
-		padRight(graphText, layout.graph),
 		padRight(nameText, layout.name),
 		padRight(r.Branch, layout.branch),
 		padRight(langText, layout.lang),
@@ -643,11 +603,11 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 		out[i] = styles[i].Render(cells[i])
 	}
 	// merged CHANGES: ahead/behind + working-tree changes + stashes as tokens
-	out[6] = gitStateCell(r, layout.changes, bgColor, current)
+	out[5] = gitStateCell(r, layout.changes, bgColor, current)
 	// AGENT: per-agent last-run marks (Claude, Codex), flagged when AI work is uncommitted
-	out[8] = agentCell(r, layout.agent, bgColor, current)
+	out[7] = agentCell(r, layout.agent, bgColor, current)
 	// activity sparkline: weekly commit cadence, tinted by recency
-	out[9] = sparkline(r.Activity, layout.activity, bgColor, current)
+	out[8] = sparkline(r.Activity, layout.activity, bgColor, current)
 	// info column gets a "↑N new" badge when there are new commits since last
 	// visit; otherwise a freshness-coloured commit age + subject (no washed-out
 	// grey). The plain fallback (from the loop) covers pulling / skip / no-commit.
@@ -657,24 +617,24 @@ func renderRow(r repo.Repo, selected, current, alt, pulling bool, spin string, n
 		tag := "× CI "
 		rest := fit("· "+info, max(2, layout.info-runewidth.StringWidth(tag)))
 		pad := max(0, layout.info-runewidth.StringWidth(tag)-runewidth.StringWidth(rest))
-		out[10] = cellStyle(red, bgColor, true).Render(tag) +
+		out[9] = cellStyle(red, bgColor, true).Render(tag) +
 			cellStyle(infoColor(r, pulling), bgColor, false).Render(rest+strings.Repeat(" ", pad))
 	case newCount > 0 && !pulling:
 		tag := fmt.Sprintf("↑%d new ", newCount)
 		rest := fit("· "+info, max(2, layout.info-runewidth.StringWidth(tag)))
 		pad := max(0, layout.info-runewidth.StringWidth(tag)-runewidth.StringWidth(rest))
-		out[10] = cellStyle(accent, bgColor, true).Render(tag) +
+		out[9] = cellStyle(accent, bgColor, true).Render(tag) +
 			cellStyle(infoColor(r, pulling), bgColor, false).Render(rest+strings.Repeat(" ", pad))
 	case !pulling && r.SkipReason == "" && strings.IndexByte(r.LastCommit, '\t') >= 0:
-		out[10] = renderInfoCell(r.LastCommit, layout.info, bgColor, current)
+		out[9] = renderInfoCell(r.LastCommit, layout.info, bgColor, current)
 	}
 
 	gap := lipgloss.NewStyle().Background(lipgloss.Color(bgColor)).Render("  ")
 	return strings.Join(out, gap)
 }
 
-// agentActiveWindow: how recently a session must have been written for the AGENT
-// cell to read "live" (an agent writing right now).
+// agentActiveWindow is how recently a session must have been written for the
+// dashboard and repo sidebar to report live agent activity.
 const agentActiveWindow = 60 * time.Second
 
 // brand marks for each agent in the AGENT column (no official Unicode logo
@@ -700,7 +660,7 @@ func agentCell(r repo.Repo, width int, bgColor string, current bool) string {
 		last = r.CodexLast
 	}
 	recent := time.Since(last)
-	live := recent < agentActiveWindow && recent > -agentActiveWindow
+	live := agentIsActive(last)
 	dirtyHot := r.Dirty && recent < 24*time.Hour
 
 	// each agent's mark in its brand colour; the older of the two is dimmed
@@ -732,6 +692,11 @@ func agentCell(r repo.Repo, width int, bgColor string, current bool) string {
 		content += cellStyle(muted, bgColor, false).Render(strings.Repeat(" ", pad))
 	}
 	return content
+}
+
+func agentIsActive(last time.Time) bool {
+	recent := time.Since(last)
+	return recent < agentActiveWindow && recent > -agentActiveWindow
 }
 
 // sparkline renders weekly commit counts as a compact bar chart sized to width.
@@ -858,7 +823,6 @@ func gitStateCell(r repo.Repo, width int, bgColor string, current bool) string {
 type gridColumns struct {
 	sel      int
 	st       int
-	graph    int
 	name     int
 	branch   int
 	lang     int
@@ -870,17 +834,16 @@ type gridColumns struct {
 }
 
 func gridLayout(width int) gridColumns {
-	// 11 columns => 10 gaps of 2 spaces = 20. GR is the code-graph badge (fresh/
-	// stale); AGENT shows when each AI agent (Claude Code, Codex) last ran per
-	// repo, marked per agent and freshness-tinted.
-	const sel, st, graph, lang, changes, synced, agent, activity, gaps = 4, 2, 2, 5, 11, 6, 8, 10, 20
-	fixed := sel + st + graph + lang + changes + synced + agent + activity + gaps
+	// 10 columns => 9 gaps of 2 spaces = 18. AGENT shows when each AI agent
+	// (Claude Code, Codex) last ran per repo, marked per agent and freshness-tinted.
+	const sel, st, lang, changes, synced, agent, activity, gaps = 4, 2, 5, 11, 6, 8, 10, 18
+	fixed := sel + st + lang + changes + synced + agent + activity + gaps
 	avail := max(24, width-fixed)
 	name := clamp(avail*42/100, 15, 36)
 	branch := clamp(avail*30/100, 11, 26)
 	info := max(0, width-fixed-name-branch) // flex column: takes the exact remainder
 	return gridColumns{
-		sel: sel, st: st, graph: graph, name: name, branch: branch, lang: lang,
+		sel: sel, st: st, name: name, branch: branch, lang: lang,
 		changes: changes, synced: synced, agent: agent, activity: activity, info: info,
 	}
 }

@@ -50,6 +50,11 @@ func modalCases() []struct {
 			m.commitMsgRepo = repo.Repo{Name: "acme-web", Path: "/tmp/acme-web"}
 			m.commitMsgLoading = true
 		}},
+		{"agentLaunch", func(m *model) {
+			m.mode = modeAgentLaunch
+			m.agentChoices = []assistantChoice{{cmd: "claude", label: "Claude Code"}, {cmd: "codex", label: "Codex"}}
+			m.agentTargets = []repo.Repo{{Name: "alpha", Path: "/tmp/alpha"}}
+		}},
 	}
 }
 
@@ -95,7 +100,7 @@ func TestModalsAreCleanRectangles(t *testing.T) {
 }
 
 // A modal must float over the dimmed dashboard, not a dark void: the backdrop
-// stays visible (dimmed) in the margins, and there is no flat undimmed band.
+// stays visible in the margins while the modal itself uses the app canvas.
 func TestModalShowsDimmedBackdrop(t *testing.T) {
 	// truecolor profile is forced for the package in TestMain
 	m := newModel("root", 8)
@@ -122,8 +127,8 @@ func TestModalShowsDimmedBackdrop(t *testing.T) {
 	if !strings.Contains(out, bgCode(dimBg)) {
 		t.Fatal("dimmed backdrop background missing")
 	}
-	if strings.Contains(out, bgCode(bg)) {
-		t.Fatal("undimmed app background leaked into modal backdrop (letterbox band)")
+	if !strings.Contains(out, bgCode(bg)) {
+		t.Fatal("modal does not use the app canvas background")
 	}
 }
 

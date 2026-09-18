@@ -30,7 +30,7 @@ Enter
 Sleep 4s
 Show
 
-# detail view: languages, AI readiness, code graph, Claude + Codex footprints
+# detail view: project status, actionable attention, and compact AI activity
 Enter
 Sleep 3s
 Screenshot docs/screenshots/details.png
