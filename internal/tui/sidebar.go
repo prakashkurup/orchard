@@ -152,7 +152,7 @@ func (m *model) layoutWorkspace() {
 	}
 	m.detailVP.Width = m.workspaceWidth()
 	m.detailVP.Height = max(1, m.height-8)
-	if m.mode == modeDetail && (m.status != "" || m.graphBuilding) {
+	if m.mode == modeDetail && m.status != "" {
 		m.detailVP.Height = max(1, m.height-9)
 	}
 	v := m.workspaceViews[m.workspacePath()]

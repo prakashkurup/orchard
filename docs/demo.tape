@@ -36,10 +36,10 @@ Show
 Enter
 
 # 1. Launch: the grove grows in, then the dashboard cascades into place
-#    (AGENT column with Claude/Codex marks, GR graph badges, usage panel).
+#    (AGENT column with Claude/Codex marks and the usage panel).
 Sleep 5s
 
-# 2. Repo detail: the regrouped Claude Code section, code graph, files touched.
+# 2. Repo detail: project status, attention items, and compact AI activity.
 Enter
 Sleep 3.5s
 

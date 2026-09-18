@@ -77,7 +77,7 @@ func (m model) handleSessionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		r := m.sessionsRepo
 		m.mode = m.returnMode
 		return m.runAssistant(r.Path, m.agentResumeArgs(s.ID), nil,
-			"resuming "+m.assistantLabel+" · "+r.Name, []string{r.Path})
+			"resuming "+m.assistantLabel+" · "+r.Name)
 	}
 	return m, nil
 }

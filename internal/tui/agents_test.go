@@ -118,10 +118,10 @@ func TestDetailShowsCodexSection(t *testing.T) {
 	m.detail = &detailState{repo: m.repoByPath(msg.path), info: msg.info, langs: msg.langs, sessions: msg.sessions,
 		commitsSince: msg.commitsSince, touched: msg.touched, codexSessions: msg.codexSessions, codexTouched: msg.codexTouched}
 	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
-	if !strings.Contains(out, "Codex") || !strings.Contains(out, "what Codex has done in this repo") {
-		t.Fatal("detail body should include the Codex section")
+	if !strings.Contains(out, "Codex") || !strings.Contains(out, "AI activity") {
+		t.Fatal("detail body should include compact Codex activity")
 	}
-	if !strings.Contains(out, "Claude Code") {
-		t.Fatal("the Claude section must still render alongside Codex")
+	if !strings.Contains(out, "Claude") {
+		t.Fatal("Claude activity must still render alongside Codex")
 	}
 }

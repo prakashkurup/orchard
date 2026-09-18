@@ -16,7 +16,6 @@ import (
 	"github.com/prakashkurup/orchard/internal/editor"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
 	"github.com/prakashkurup/orchard/internal/github"
-	"github.com/prakashkurup/orchard/internal/graph"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 	"github.com/prakashkurup/orchard/internal/search"
@@ -249,13 +248,9 @@ type model struct {
 	worklogWindow string // git --since value, e.g. "1 day ago"
 	worklogText   string // plain-text digest for clipboard copy
 
-	newByPath          map[string]int             // repo path -> commits since last visit
-	langByPath         map[string]lang.Stat       // repo path -> dominant language
-	graphStates        map[string]graphBadgeState // repo path -> code-graph badge (fresh/stale)
-	graphBuilding      bool                       // a code-graph build is in flight (animates the spinner)
-	graphBuildingPath  string                     // repo path currently being built (animates its GR cell)
-	graphWireOff       bool                       // session opt-out of auto-wiring the graph MCP on launch
-	instructionsByPath map[string]instrState      // repo path -> CLAUDE.md / AGENTS.md health
+	newByPath          map[string]int        // repo path -> commits since last visit
+	langByPath         map[string]lang.Stat  // repo path -> dominant language
+	instructionsByPath map[string]instrState // repo path -> CLAUDE.md / AGENTS.md health
 	seenChecked        bool
 
 	konami      []string // recent arrow keys, for the bloom easter egg
@@ -335,9 +330,6 @@ type detailMsg struct {
 	touched       []claude.TouchedFile
 	codexSessions []claude.Session
 	codexTouched  []claude.TouchedFile
-	graph         graph.GraphState
-	graphOK       bool
-	graphMap      []graph.MapRow
 	err           error
 }
 
@@ -729,7 +721,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// recompute languages on every manual scan (startup / refresh / after
 		// clone) so newly-added repos get their language; claude usage too.
 		m.codeburnLoading = true
-		cmds := []tea.Cmd{claudeStatsCmd(m.repos), codeburnCmd(m.codeburnClient, m.root, m.codeburnPeriod), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos), graphStatesCmd(m.repos), countCmd}
+		cmds := []tea.Cmd{claudeStatsCmd(m.repos), codeburnCmd(m.codeburnClient, m.root, m.codeburnPeriod), langCmd(m.repos), ghStatusCmd(m.repos), instrCmd(m.repos), countCmd}
 		if !m.seenChecked { // "since last visit" baseline: once per launch only
 			m.seenChecked = true
 			cmds = append(cmds, newCommitsCmd(m.repos))
@@ -803,30 +795,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.text
 		return m, nil
 
-	case graphStatesMsg:
-		m.graphStates = msg.states
-		m.syncRows() // repaint the grid so the new badges show (grid is cached, not live)
-		return m, nil
-
-	case graphProgressMsg:
-		if next := msg.idx + 1; next < len(msg.targets) {
-			m.graphBuildingPath = msg.targets[next].Path
-			m.status = buildQueueLabel(msg.targets, next, msg.acc)
-			if m.mode == modeDetail {
-				m.setDetailContent()
-			}
-			return m, tea.Batch(buildGraphStepCmd(msg.targets, next, msg.acc), m.spinner.Tick)
-		}
-		m.graphBuilding = false
-		m.graphBuildingPath = ""
-		m.status = buildSummary(msg.acc)
-		// if the open detail page was just (re)built, reload its code-graph section
-		if m.mode == modeDetail && m.detail != nil {
-			m.detail.graph, m.detail.graphOK, m.detail.graphMap = loadGraph(m.detailRepo)
-			m.setDetailContent()
-		}
-		return m, graphStatesCmd(m.repos) // refresh badges now the build is done
-
 	case claudeStatsMsg:
 		u, cu := msg.usage, msg.codex
 		m.claudeUsage, m.codexUsage = &u, &cu
@@ -877,7 +845,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.repos = msg.repos
 			m.dropMissingSelections()
 			m.syncRows()
-			return m, graphStatesCmd(m.repos) // HEAD/dirty may have moved
+			return m, nil
 		}
 		return m, nil
 
@@ -931,7 +899,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repos = msg.repos
 		m.dropMissingSelections()
 		m.syncRows()
-		return m, graphStatesCmd(m.repos) // HEAD/dirty may have moved
+		return m, nil
 
 	case branchesMsg:
 		if msg.path == m.branchRepo {
@@ -1111,7 +1079,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case detailMsg:
 		if msg.path == m.detailRepo && msg.request == m.detailRequest {
-			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions, commitsSince: msg.commitsSince, touched: msg.touched, codexSessions: msg.codexSessions, codexTouched: msg.codexTouched, graph: msg.graph, graphOK: msg.graphOK, graphMap: msg.graphMap}
+			st := &detailState{repo: m.repoByPath(msg.path), langs: msg.langs, sessions: msg.sessions, commitsSince: msg.commitsSince, touched: msg.touched, codexSessions: msg.codexSessions, codexTouched: msg.codexTouched}
 			if msg.err != nil {
 				st.err = msg.err.Error()
 			} else {
@@ -1135,13 +1103,6 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case len(m.pulling) > 0:
 			m.syncRows()
 			return m, cmd
-		case m.graphBuilding:
-			if m.mode == modeDetail {
-				m.setDetailContent() // re-render the "building…" line in the detail viewport
-			} else {
-				m.syncRows() // animate the building repo's GR spinner (grid is cached)
-			}
-			return m, cmd // list/detail status reads m.spinner.View() on each render
 		case m.mode == modeDetail && m.detail == nil:
 			m.setDetailContent() // re-render the animated loading line in the viewport
 			return m, cmd

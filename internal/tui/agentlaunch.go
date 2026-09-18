@@ -217,18 +217,14 @@ func (m model) launchAgentSelection() (tea.Model, tea.Cmd) {
 		if placement == agentThisTab {
 			status = "running " + choice.label + " here · " + targets[0].Name
 		}
-		return m.runAssistantPlaced(targets[0].Path, args, nil, status, []string{targets[0].Path}, placement)
+		return m.runAssistantPlaced(targets[0].Path, args, nil, status, placement)
 	}
 	return m.launchAgentTabs(targets, args)
 }
 
 func (m model) launchAgentTabs(targets []repo.Repo, args []string) (tea.Model, tea.Cmd) {
 	progs := make([]string, len(targets))
-	var wireErr error
-	for i, r := range targets {
-		if err := m.wireGraphMCP(r.Path, []string{r.Path}); err != nil {
-			wireErr = err
-		}
+	for i := range targets {
 		prog := m.assistantCmd
 		for _, arg := range args {
 			prog += " " + shQuote(arg)
@@ -239,8 +235,7 @@ func (m model) launchAgentTabs(targets []repo.Repo, args []string) (tea.Model, t
 		m.status = "this terminal cannot open multiple agent tabs"
 		return m, nil
 	}
-	suffix := m.graphSuffix(wireErr)
-	m.status = fmt.Sprintf("opening %s in %d tabs%s", m.assistantLabel, len(targets), suffix)
+	m.status = fmt.Sprintf("opening %s in %d tabs", m.assistantLabel, len(targets))
 	return m, func() tea.Msg {
 		opened := 0
 		for i, target := range targets {
@@ -248,16 +243,14 @@ func (m model) launchAgentTabs(targets []repo.Repo, args []string) (tea.Model, t
 				opened++
 			}
 		}
-		return statusMsg{text: fmt.Sprintf("opened %s in %d tabs%s", m.assistantLabel, opened, suffix)}
+		return statusMsg{text: fmt.Sprintf("opened %s in %d tabs", m.assistantLabel, opened)}
 	}
 }
 
-func (m model) runAssistantPlaced(cwd string, args, env []string, status string, graphRepos []string, placement agentPlacement) (tea.Model, tea.Cmd) {
+func (m model) runAssistantPlaced(cwd string, args, env []string, status string, placement agentPlacement) (tea.Model, tea.Cmd) {
 	if placement == agentNewTab {
-		return m.runAssistant(cwd, args, env, status, graphRepos)
+		return m.runAssistant(cwd, args, env, status)
 	}
-	wireErr := m.wireGraphMCP(cwd, graphRepos)
-	status += m.graphSuffix(wireErr)
 	fields := append(strings.Fields(m.assistantCmd), args...)
 	if len(fields) == 0 {
 		m.status = "cannot launch agent"

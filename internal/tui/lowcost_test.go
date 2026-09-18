@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/prakashkurup/orchard/internal/claude"
 	orchardgit "github.com/prakashkurup/orchard/internal/git"
-	"github.com/prakashkurup/orchard/internal/graph"
 	"github.com/prakashkurup/orchard/internal/lang"
 	"github.com/prakashkurup/orchard/internal/repo"
 )
@@ -230,23 +229,12 @@ func TestTouchMapUncommittedFlag(t *testing.T) {
 			{Path: "src/c.go", Reads: 3, Last: now},  // read-only, dirty -> not flagged
 		},
 	}
-	out := ansiPattern.ReplaceAllString(m.detailBody(120), "")
-	if !strings.Contains(out, "1 uncommitted") {
-		t.Fatalf("summary should report 1 uncommitted (only the edited+dirty file)\n%s", out)
+	if got := dirtyAIEditsCount(m.detail); got != 1 {
+		t.Fatalf("dirtyAIEditsCount = %d, want 1", got)
 	}
-	for _, ln := range strings.Split(out, "\n") {
-		touchRow := strings.Contains(ln, "edit ") || strings.Contains(ln, "read ")
-		if !touchRow { // skip the working-tree section, which lists the same files
-			continue
-		}
-		switch {
-		case strings.Contains(ln, "a.go") && !strings.Contains(ln, "uncommitted"):
-			t.Errorf("a.go (edited+dirty) should be flagged: %q", ln)
-		case strings.Contains(ln, "b.go") && strings.Contains(ln, "uncommitted"):
-			t.Errorf("b.go (clean) must not be flagged: %q", ln)
-		case strings.Contains(ln, "c.go") && strings.Contains(ln, "uncommitted"):
-			t.Errorf("c.go (read-only) must not be flagged: %q", ln)
-		}
+	out := ansiPattern.ReplaceAllString(m.detailBody(120), "")
+	if !strings.Contains(out, "1 AI-edited file uncommitted") {
+		t.Fatalf("summary should report 1 uncommitted (only the edited+dirty file)\n%s", out)
 	}
 }
 
@@ -275,144 +263,83 @@ func TestDetailHealthNudges(t *testing.T) {
 	}
 }
 
-func TestAIReadinessCardReady(t *testing.T) {
+func TestDetailHidesAttentionWhenHealthy(t *testing.T) {
 	m := newModel("root", 4)
 	m.detailRepo = "/repo"
 	m.assistantCmd = "claude"
 	m.assistantLabel = "Claude"
-	m.instructionsByPath = map[string]instrState{
-		"/repo": {hasClaude: true, hasAgents: true, imports: true},
-	}
-	m.detail = &detailState{
-		repo: repo.Repo{Path: "/repo", Name: "repo", Head: "abcdef123456"},
-		graph: graph.GraphState{
-			HeadCommit: "abcdef123456",
-			DirtyFiles: 0,
-			Files:      3,
-			Symbols:    5,
-			Edges:      7,
-			Tiers:      map[graph.Tier]int{graph.TierPrecise: 3},
-			Trust:      []graph.LangTrust{{Lang: "go", Tier: graph.TierPrecise, Files: 3}},
-		},
-		graphOK: true,
-	}
+	m.instructionsByPath = map[string]instrState{"/repo": {hasClaude: true, hasAgents: true, imports: true}}
+	m.detail = &detailState{repo: repo.Repo{Path: "/repo", Name: "repo"}}
 
 	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
-	for _, want := range []string{
-		"AI readiness",
-		"ready to launch",
-		"graph fresh",
-		"trust Go: precise",
-		"MCP auto-wires Claude",
-		"context ready",
-		"AI edits none",
-		"launch safely with c",
-	} {
+	for _, want := range []string{"Project", "AI activity", "No Claude or Codex sessions yet"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("readiness card missing %q\n%s", want, out)
+			t.Fatalf("detail body missing %q\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"Attention", "AI readiness"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("healthy detail should not show %q\n%s", unwanted, out)
 		}
 	}
 }
 
-func TestAIReadinessCardFixesActionableIssues(t *testing.T) {
+func TestDetailShowsOnlyActionableAttention(t *testing.T) {
 	now := time.Now()
 	m := newModel("root", 4)
 	m.detailRepo = "/repo"
 	m.assistantCmd = "claude"
 	m.assistantLabel = "Claude"
-	m.graphWireOff = true
-	m.instructionsByPath = map[string]instrState{
-		"/repo": {hasAgents: true},
-	}
+	m.instructionsByPath = map[string]instrState{"/repo": {hasAgents: true}}
 	m.detail = &detailState{
-		repo: repo.Repo{Path: "/repo", Name: "repo", Head: "abcdef123456"},
-		info: orchardgit.DetailInfo{StatusLines: []string{" M src/a.go"}},
-		touched: []claude.TouchedFile{{
-			Path: "src/a.go", Writes: 1, Last: now,
-		}},
+		repo:         repo.Repo{Path: "/repo", Name: "repo"},
+		info:         orchardgit.DetailInfo{StatusLines: []string{" M src/a.go"}},
+		commitsSince: 14,
+		touched:      []claude.TouchedFile{{Path: "src/a.go", Writes: 1, Last: now}},
 	}
 
 	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
 	for _, want := range []string{
-		"AI readiness",
-		"needs attention",
-		"graph never built",
-		"MCP wiring off",
-		"AGENTS.md not loaded",
-		"1 AI edit uncommitted",
-		"press B to build the code graph",
-		"press m to enable graph MCP wiring",
-		"press I to create CLAUDE.md importing @AGENTS.md",
-		"review or commit Claude-edited dirty files",
+		"Attention  ·  3",
+		"AGENTS.md isn't loaded by Claude",
+		"press I to wire it automatically",
+		"Claude's session context may be stale",
+		"review 14 commits since it last ran",
+		"1 AI-edited file uncommitted",
+		"press d to review the changes",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("readiness card missing %q\n%s", want, out)
+			t.Fatalf("attention section missing %q\n%s", want, out)
 		}
 	}
 }
 
-func TestAIReadinessCardExplainsGraphStaleness(t *testing.T) {
+func TestDetailAIActivityIsCompact(t *testing.T) {
+	now := time.Now()
 	m := newModel("root", 4)
 	m.detailRepo = "/repo"
 	m.assistantCmd = "claude"
 	m.assistantLabel = "Claude"
-	m.instructionsByPath = map[string]instrState{
-		"/repo": {hasClaude: true, hasAgents: true, imports: true},
-	}
+	m.instructionsByPath = map[string]instrState{"/repo": {hasClaude: true}}
 	m.detail = &detailState{
-		repo: repo.Repo{Path: "/repo", Name: "repo", Head: "newhead", Dirty: true},
-		graph: graph.GraphState{
-			HeadCommit: "oldhead",
-			Files:      4,
-			Symbols:    8,
-			Edges:      12,
-			Changed:    2,
-			Trust:      []graph.LangTrust{{Lang: "kotlin", Tier: graph.TierBestEffort, Files: 4}},
-		},
-		graphOK: true,
+		sessions:      []claude.Session{{Title: "A verbose Claude session title", Assistant: 3, Tokens: 1200, Modified: now.Add(-2 * time.Hour)}},
+		codexSessions: []claude.Session{{Title: "A verbose Codex session title", Assistant: 2, Tokens: 800, Modified: now.Add(-time.Hour)}},
 	}
 
 	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
-	for _, want := range []string{
-		"graph HEAD moved",
-		"dirty tree",
-		"2 files changed",
-		"trust Kotlin: best-effort",
-		"press B to rebuild at the current HEAD",
-	} {
+	for _, want := range []string{"AI activity", "Claude", "1 session", "3 turns", "Codex", "2 turns"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("readiness/detail should explain stale graph reason %q\n%s", want, out)
+			t.Fatalf("compact activity missing %q\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"A verbose Claude session title", "A verbose Codex session title"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("detail should leave session titles to the sessions view\n%s", out)
 		}
 	}
 }
 
-func TestDetailShowsGraphSetupNudge(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("PATH", t.TempDir())
-	t.Setenv("ORCHARD_AST_GREP_PATH", "")
-
-	m := newModel("root", 4)
-	m.detailRepo = "/repo"
-	m.assistantCmd = "claude"
-	m.assistantLabel = "Claude"
-	m.instructionsByPath = map[string]instrState{
-		"/repo": {hasClaude: true},
-	}
-	m.detail = &detailState{
-		repo:  repo.Repo{Path: "/repo", Name: "repo"},
-		langs: []lang.Stat{{Name: "Go"}, {Name: "Kotlin"}},
-	}
-
-	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
-	want := "ast-grep missing · press B to build Go only · run orchard graph install-ast-grep for full graph"
-	if !strings.Contains(out, want) {
-		t.Fatalf("detail should nudge ast-grep setup\n%s", out)
-	}
-}
-
-func TestDetailClaudeTouchMapReadable(t *testing.T) {
+func TestDetailLeavesTouchMapToDedicatedView(t *testing.T) {
 	m := newModel("root", 4)
 	now := time.Now()
 	m.detailRepo = "/repo"
@@ -429,34 +356,13 @@ func TestDetailClaudeTouchMapReadable(t *testing.T) {
 	}
 
 	out := ansiPattern.ReplaceAllString(m.detailBody(120), "")
-	for _, want := range []string{
-		"none · no CLAUDE.md or AGENTS.md", // context label value
-		"1 touched",                        // files summary
-		"0 edited",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("detail body missing %q\n%s", want, out)
-		}
+	if !strings.Contains(out, "AI activity") || !strings.Contains(out, "1 session") {
+		t.Fatalf("detail should retain the compact activity summary\n%s", out)
 	}
-	// the touch row reads as a labeled table line: read action, compacted path,
-	// touch count, and age, all on one line.
-	var rowFound bool
-	for _, ln := range strings.Split(out, "\n") {
-		if !strings.Contains(ln, "…/constants/IterableEvents.kt") {
-			continue
+	for _, unwanted := range []string{"IterableEvents.kt", "1 touched", "0 edited", "Add context passing"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("detail should leave %q to the sessions/files views\n%s", unwanted, out)
 		}
-		rowFound = true
-		for _, part := range []string{"read", "1 touch", "1d"} {
-			if !strings.Contains(ln, part) {
-				t.Fatalf("touch row missing %q: %q", part, ln)
-			}
-		}
-	}
-	if !rowFound {
-		t.Fatalf("touch map row missing\n%s", out)
-	}
-	if strings.Contains(out, "app/src/main/kotlin/com/upstart") {
-		t.Fatalf("touch map should compact long source roots\n%s", out)
 	}
 }
 
@@ -477,11 +383,12 @@ func TestDetailSectionIndentation(t *testing.T) {
 
 	out := ansiPattern.ReplaceAllString(m.detailBody(140), "")
 	for _, want := range []string{
-		"    Languages",
-		"    K Kotlin",
-		"    Claude Code",
-		"    activity",
-		"    Commit graph",
+		"    Project",
+		"    working tree ● clean",
+		"    stack        K Kotlin",
+		"    AI activity",
+		"    Claude",
+		"    Recent commits",
 		"    ● fab9b60",
 	} {
 		if !strings.Contains(out, want) {
@@ -490,5 +397,43 @@ func TestDetailSectionIndentation(t *testing.T) {
 	}
 	if strings.Contains(out, "  ● fab9b60") && !strings.Contains(out, "    ● fab9b60") {
 		t.Fatalf("commit graph row is under-indented\n%s", out)
+	}
+}
+
+func TestDetailPrioritizesStatusAndActions(t *testing.T) {
+	m := newModel("root", 4)
+	m.detailRepo = "/repo"
+	m.assistantCmd = "claude"
+	m.assistantLabel = "Claude"
+	m.instructionsByPath = map[string]instrState{"/repo": {hasAgents: true}}
+	m.detail = &detailState{
+		repo: repo.Repo{Path: "/repo", Name: "repo"},
+		info: orchardgit.DetailInfo{
+			StatusLines: []string{" M src/app.go"},
+			Graph:       []orchardgit.GraphRow{{Rail: "*", IsCommit: true, Hash: "fab9b60", Subject: "Update app"}},
+			Remotes:     []string{"origin  git@github.com:org/repo.git"},
+		},
+	}
+
+	out := ansiPattern.ReplaceAllString(m.detailBody(120), "")
+	ordered := []string{"Project", "Attention  ·  1", "AI activity", "Working tree  ·  1 change", "Recent commits", "Remotes"}
+	last := -1
+	for _, want := range ordered {
+		i := strings.Index(out, want)
+		if i < 0 {
+			t.Fatalf("detail body missing %q\n%s", want, out)
+		}
+		if i <= last {
+			t.Fatalf("%q should appear after the previous high-priority section\n%s", want, out)
+		}
+		last = i
+	}
+
+	// A clean repository gets one concise status row, not a second empty
+	// working-tree section farther down the page.
+	m.detail.info.StatusLines = nil
+	out = ansiPattern.ReplaceAllString(m.detailBody(120), "")
+	if strings.Count(out, "working tree") != 1 || strings.Contains(out, "Working tree  ·  0 changes") {
+		t.Fatalf("clean working tree should be summarized once\n%s", out)
 	}
 }

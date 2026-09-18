@@ -46,7 +46,7 @@ func (m model) openCommitMessage(r repo.Repo) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if !m.assistantIsClaude() && !m.assistantIsCodex() {
-		return m.runAssistant(r.Path, []string{commitMsgPrompt}, nil, "drafting a commit message · "+r.Name, nil)
+		return m.runAssistant(r.Path, []string{commitMsgPrompt}, nil, "drafting a commit message · "+r.Name)
 	}
 	m.commitMsgRepo = r
 	m.commitMsg = ""
